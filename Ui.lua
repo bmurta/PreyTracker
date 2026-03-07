@@ -422,9 +422,9 @@ local function CreateFilterBar(parent)
 end
 
 -- Recalculate pill widths to fill the current panel width. Call after resize.
-local function ResizeFilterBar(bar)
+local function ResizeFilterBar(bar, panelW)
     if not bar then return end
-    local totalW = bar:GetWidth()
+    local totalW = (panelW or bar:GetWidth()) - 24  -- 12px padding each side
     local n      = #bar.pills
     local gap    = 2
     local pillW  = math.floor((totalW - gap * (n - 1)) / n)
@@ -562,7 +562,7 @@ function PH.AnchorPanel()
     local w = PH.standalone and CFG.PANEL_WIDTH_STANDALONE or CFG.PANEL_WIDTH
     PH.panel:SetWidth(w)
     if PH.scrollChild then PH.scrollChild:SetWidth(w - 30) end
-    ResizeFilterBar(PH.panel.filterBar)
+    ResizeFilterBar(PH.panel.filterBar, w)
     PH.panel:ClearAllPoints()
     if PH.standalone then
         PH.panel:SetHeight(CFG.PANEL_HEIGHT)
@@ -728,6 +728,11 @@ local function AnchorMapOverlay()
 end
 
 function PH.ShowLoadingFrame(done, total)
+    -- Build and anchor the real panel now so the filter bar is sized correctly
+    -- before the loading frame disappears. The panel stays hidden behind it.
+    PH.BuildPanel()
+    PH.AnchorPanel()
+
     BuildLoadingFrame()
     BuildMapOverlay()
     AnchorLoadingFrame()
@@ -778,11 +783,56 @@ end
 -- Minimap button
 -- ---------------------------------------------------------------------------
 function PH.CreateMinimapButton()
-    -- Persisted angle (degrees). Defaults to 225 (bottom-left of minimap).
     if not PreyHubDB then PreyHubDB = {} end
-    if not PreyHubDB.minimapAngle then PreyHubDB.minimapAngle = 225 end
+    if PreyHubDB.minimap == nil then PreyHubDB.minimap = {} end
 
-    local RADIUS = 80  -- distance from minimap centre to button centre
+    -- -----------------------------------------------------------------------
+    -- Path A: LibDBIcon (handles ElvUI, MBB, every other manager addon)
+    -- -----------------------------------------------------------------------
+    local LDB    = LibStub and LibStub("LibDataBroker-1.1", true)
+    local LDBIcon = LibStub and LibStub("LibDBIcon-1.0", true)
+    if LDB and LDBIcon then
+        local broker = LDB:NewDataObject("PreyHub", {
+            type  = "launcher",
+            label = "PreyHub",
+            icon  = "Interface\\Icons\\Ui_prey",
+            OnClick = function(_, button)
+                if button ~= "LeftButton" then return end
+                PH.BuildPanel()
+                if PH.panel:IsShown() then
+                    PH.ForceHidePanel()
+                else
+                    PH.standalone = true
+                    PH.RefreshFromPins()
+                    local cacheWarm = true
+                    for _, h in ipairs(PH.liveHunts) do
+                        if PH.rewardCache[h.questID] == nil then cacheWarm = false; break end
+                    end
+                    if cacheWarm then
+                        PH.ShowPanel()
+                    else
+                        PH.ShowLoadingFrame(0, #PH.liveHunts)
+                        PH.WarmRewardCacheAsync(
+                            function(done, total) PH.ShowLoadingFrame(done, total) end,
+                            function() PH.ShowPanel() end
+                        )
+                    end
+                end
+            end,
+            OnTooltipShow = function(tt)
+                tt:AddLine("PreyHub", 0.85, 0.5, 1.0)
+                tt:AddLine("Toggle Prey Hunt panel", 0.7, 0.7, 0.75)
+            end,
+        })
+        LDBIcon:Register("PreyHub", broker, PreyHubDB.minimap)
+        return
+    end
+
+    -- -----------------------------------------------------------------------
+    -- Path B: Manual fallback (no LibDBIcon installed)
+    -- -----------------------------------------------------------------------
+    if not PreyHubDB.minimapAngle then PreyHubDB.minimapAngle = 225 end
+    local RADIUS = 80
 
     local btn = CreateFrame("Button", "PreyHubMinimapBtn", Minimap)
     btn:SetSize(31, 31)
@@ -790,14 +840,12 @@ function PH.CreateMinimapButton()
     btn:SetFrameLevel(8)
     btn:SetClampedToScreen(true)
 
-    -- Square icon
     local tex = btn:CreateTexture(nil, "BACKGROUND")
-    tex:SetPoint("TOPLEFT",     btn, "TOPLEFT",     2, -2)
+    tex:SetPoint("TOPLEFT",     btn, "TOPLEFT",      2, -2)
     tex:SetPoint("BOTTOMRIGHT", btn, "BOTTOMRIGHT", -2,  2)
     tex:SetTexture("Interface\\Icons\\Ui_prey")
     tex:SetTexCoord(0.07, 0.93, 0.07, 0.93)
 
-    -- Standard circular minimap border
     local border = btn:CreateTexture(nil, "OVERLAY")
     border:SetSize(53, 53)
     border:SetPoint("CENTER", btn, "CENTER")
@@ -809,7 +857,6 @@ function PH.CreateMinimapButton()
     hl:SetVertexColor(1, 1, 1, 0.18)
     hl:SetBlendMode("ADD")
 
-    -- Position button on the minimap ring at a given angle
     local function SetAngle(deg)
         PreyHubDB.minimapAngle = deg
         local rad = math.rad(deg)
@@ -818,10 +865,8 @@ function PH.CreateMinimapButton()
             math.cos(rad) * RADIUS,
             math.sin(rad) * RADIUS)
     end
-
     SetAngle(PreyHubDB.minimapAngle)
 
-    -- Drag to reposition around the minimap ring
     btn:RegisterForDrag("LeftButton")
     btn:SetScript("OnDragStart", function(self)
         self:SetScript("OnUpdate", function()
@@ -859,7 +904,6 @@ function PH.CreateMinimapButton()
             end
         end
     end)
-
     btn:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_LEFT")
         GameTooltip:AddLine("PreyHub", 0.85, 0.5, 1.0)

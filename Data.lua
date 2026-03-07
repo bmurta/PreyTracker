@@ -4,6 +4,7 @@ local CFG = PH.CFG
 
 PH.liveHunts   = {}
 PH.rewardCache = {}
+local attemptCount = {}  -- [questID] = warm attempts this session
 
 -- ---------------------------------------------------------------------------
 -- Parsing
@@ -85,6 +86,7 @@ function PH.RefreshFromPins()
     -- Different hunts — full reset
     wipe(PH.liveHunts)
     wipe(PH.rewardCache)
+    wipe(attemptCount)
     for _, h in ipairs(newHunts) do
         PH.liveHunts[#PH.liveHunts + 1] = h
     end
@@ -139,12 +141,16 @@ end
 --      for STABLE_NEEDED consecutive polls — meaning the pool has settled.
 --   3. If count stays 0 for too long, or total time exceeds TIMEOUT_S, give up.
 --   4. Commit result, call onProgress, move to next quest.
--- onProgress(done, total) called after each quest.
--- onDone() called when all quests are finished.
+--
+-- If a quest times out with 0 rewards and has been attempted fewer than
+-- MAX_ATTEMPTS times this session, it is left as nil in the cache so it will
+-- be re-queued on the next warm call (i.e. next time the map is opened).
+-- After MAX_ATTEMPTS failures it is accepted as genuinely reward-less.
 -- ---------------------------------------------------------------------------
-local POLL_MS       = 0.10   -- poll interval
-local STABLE_NEEDED = 3      -- consecutive identical non-zero reads before commit
-local TIMEOUT_S     = 4.0    -- hard per-quest timeout
+local POLL_MS       = 0.10
+local STABLE_NEEDED = 3
+local TIMEOUT_S     = 4.0
+local MAX_ATTEMPTS  = 3   -- retries across map opens before accepting empty
 
 function PH.WarmRewardCacheAsync(onProgress, onDone)
     local dialog = AdventureMapQuestChoiceDialog
@@ -161,8 +167,8 @@ function PH.WarmRewardCacheAsync(onProgress, onDone)
         end
     end
 
-    local total     = #PH.liveHunts  -- for progress display
-    local doneCount = total - #queue  -- already cached from a previous warm
+    local total     = #PH.liveHunts
+    local doneCount = total - #queue
 
     if #queue == 0 then
         if onDone then onDone() end
@@ -181,7 +187,7 @@ function PH.WarmRewardCacheAsync(onProgress, onDone)
         PH._rewardWarmCancel = nil
     end
 
-    local StartNext  -- forward declare
+    local StartNext
     local qIdx      = 1
     local elapsed   = 0
     local lastCount = -1
@@ -191,12 +197,28 @@ function PH.WarmRewardCacheAsync(onProgress, onDone)
         if ticker then ticker:Cancel(); ticker = nil end
     end
 
-    local function CommitAndAdvance(rewards)
+    local function CommitAndAdvance(rewards, timedOutEmpty)
         CleanupTicker()
         dialog:Hide()
         dialog:SetAlpha(prevAlpha)
 
-        PH.rewardCache[queue[qIdx].questID] = rewards
+        local questID = queue[qIdx].questID
+        if timedOutEmpty then
+            -- Timed out with no rewards — decide whether to accept or retry
+            attemptCount[questID] = (attemptCount[questID] or 0) + 1
+            if attemptCount[questID] >= MAX_ATTEMPTS then
+                -- Exhausted retries — accept as genuinely reward-less
+                PH.rewardCache[questID] = {}
+            else
+                -- Leave cache nil so next map open re-queues this quest
+                PH.rewardCache[questID] = nil
+            end
+        else
+            -- Got real rewards (or no-pin skip) — commit and clear attempt counter
+            PH.rewardCache[questID] = rewards
+            attemptCount[questID]   = nil
+        end
+
         doneCount = doneCount + 1
         if onProgress then onProgress(doneCount, total) end
 
@@ -207,7 +229,6 @@ function PH.WarmRewardCacheAsync(onProgress, onDone)
             return
         end
 
-        -- Brief gap so the dialog fully tears down before next ShowWithQuest
         C_Timer.After(0.05, function()
             if cancelled then return end
             StartNext()
@@ -223,7 +244,7 @@ function PH.WarmRewardCacheAsync(onProgress, onDone)
         local hunt = queue[qIdx]
         local pin  = PH.FindPin(hunt.questID)
         if not pin then
-            CommitAndAdvance({})
+            CommitAndAdvance({}, false)
             return
         end
 
@@ -241,18 +262,17 @@ function PH.WarmRewardCacheAsync(onProgress, onDone)
             if n > 0 and n == lastCount then
                 stableN = stableN + 1
                 if stableN >= STABLE_NEEDED then
-                    CommitAndAdvance(rewards)
+                    CommitAndAdvance(rewards, false)
                     return
                 end
             else
-                -- Count changed or first read — reset stability window
                 stableN   = 0
                 lastCount = n
             end
 
             if elapsed >= TIMEOUT_S then
-                -- Take whatever we have and move on
-                CommitAndAdvance(rewards)
+                -- Pass timedOutEmpty=true only if we got nothing at all
+                CommitAndAdvance(rewards, #rewards == 0)
             end
         end)
     end
