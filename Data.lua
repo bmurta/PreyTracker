@@ -96,7 +96,13 @@ end
 -- ---------------------------------------------------------------------------
 -- Reward helpers
 -- ---------------------------------------------------------------------------
+local function IsXPNumber(s)
+    -- Matches strings like "19415" or "19,415" with no alphabetic characters
+    return s:match("^[%d,]+$") ~= nil
+end
+
 local function GetRewardIcon(name)
+    if IsXPNumber(name) then return "Interface\\Icons\\xp_icon" end
     for _, entry in ipairs(PH.REWARD_ICONS) do
         if name:find(entry.match, 1, true) then return entry.icon end
     end
@@ -120,11 +126,12 @@ local function SnapshotPool()
         local name  = reward.Name  and reward.Name:GetText()
         local count = reward.Count and reward.Count:GetText()
         if name and name ~= "" then
+            local displayName = IsXPNumber(name) and ("Player Experience (" .. name .. ")") or name
             rewards[#rewards + 1] = {
-                name      = name,
+                name      = displayName,
                 icon      = GetRewardIcon(name),
                 count     = (count and count ~= "" and count ~= "1") and count or nil,
-                sortOrder = RewardSortKey(name),
+                sortOrder = IsXPNumber(name) and 5 or RewardSortKey(name),
             }
         end
     end
