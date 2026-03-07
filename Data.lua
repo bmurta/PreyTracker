@@ -1,19 +1,12 @@
--- =============================================================================
---  PreyHub — Data.lua
---  Hunt data from map pins, reward caching, filtering and sorting.
--- =============================================================================
-
-local PH = _G.PreyHub
+-- PreyHub — Data.lua
+local PH  = PreyHub
 local CFG = PH.CFG
 
--- ---------------------------------------------------------------------------
--- Hunt list — repopulated each time the map opens
--- ---------------------------------------------------------------------------
 PH.liveHunts   = {}
-PH.rewardCache = {}  -- [questID] = { {name, icon, count}, ... }
+PH.rewardCache = {}
 
 -- ---------------------------------------------------------------------------
--- Parsing helpers
+-- Parsing
 -- ---------------------------------------------------------------------------
 local function ParseDifficulty(desc)
     if not desc then return "Normal" end
@@ -31,7 +24,7 @@ local function GetZoneFromCoords(x, y)
 end
 
 -- ---------------------------------------------------------------------------
--- Pin access
+-- Pins
 -- ---------------------------------------------------------------------------
 local PIN_POOL = "AdventureMap_QuestOfferPinTemplate"
 
@@ -49,23 +42,57 @@ function PH.FindPin(questID)
 end
 
 function PH.RefreshFromPins()
-    wipe(PH.liveHunts)
     local pool = GetPinPool()
-    if not pool then return end
-    for pin in pool:EnumerateActive() do
-        if pin.questID and pin.title then
-            PH.liveHunts[#PH.liveHunts + 1] = {
-                name       = pin.title,
-                difficulty = ParseDifficulty(pin.description),
-                questID    = pin.questID,
-                zone       = GetZoneFromCoords(pin.normalizedX, pin.normalizedY),
-            }
+
+    -- Collect new pins first without wiping anything yet
+    local newHunts = {}
+    local newIDs   = {}
+    if pool then
+        for pin in pool:EnumerateActive() do
+            if pin.questID and pin.title then
+                newHunts[#newHunts + 1] = {
+                    name       = pin.title,
+                    difficulty = ParseDifficulty(pin.description),
+                    questID    = pin.questID,
+                    zone       = GetZoneFromCoords(pin.normalizedX, pin.normalizedY),
+                }
+                newIDs[pin.questID] = true
+            end
         end
     end
+
+    -- Check if the set of quest IDs is identical to what we already have
+    local cacheValid = (#newHunts == #PH.liveHunts)
+    if cacheValid then
+        for _, h in ipairs(PH.liveHunts) do
+            if not newIDs[h.questID] then
+                cacheValid = false
+                break
+            end
+        end
+    end
+
+    if cacheValid then
+        -- Same hunts — just refresh the hunt list (names/zones may have updated)
+        -- but keep rewardCache intact so we don't reload
+        wipe(PH.liveHunts)
+        for _, h in ipairs(newHunts) do
+            PH.liveHunts[#PH.liveHunts + 1] = h
+        end
+        return true   -- cache is warm
+    end
+
+    -- Different hunts — full reset
+    wipe(PH.liveHunts)
+    wipe(PH.rewardCache)
+    for _, h in ipairs(newHunts) do
+        PH.liveHunts[#PH.liveHunts + 1] = h
+    end
+    return false  -- cache needs warming
 end
 
 -- ---------------------------------------------------------------------------
--- Reward caching — reads from the quest dialog invisibly, caches per questID
+-- Reward helpers
 -- ---------------------------------------------------------------------------
 local function GetRewardIcon(name)
     for _, entry in ipairs(PH.REWARD_ICONS) do
@@ -74,65 +101,170 @@ local function GetRewardIcon(name)
     return PH.FALLBACK_ICON
 end
 
-local REWARD_SORT_ORDER = {
-    ["Dawncrest"] = 1,  -- crests first
-    ["Chest"]     = 2,
-    ["Sack"]      = 3,
-    ["Journey"]   = 4,
-}
-
+local REWARD_SORT = { ["Dawncrest"]=1, ["Chest"]=2, ["Sack"]=3, ["Journey"]=4 }
 local function RewardSortKey(name)
-    for pattern, order in pairs(REWARD_SORT_ORDER) do
+    for pattern, order in pairs(REWARD_SORT) do
         if name:find(pattern, 1, true) then return order end
     end
     return 99
 end
 
-function PH.GetRewards(questID)
-    if PH.rewardCache[questID] ~= nil then return PH.rewardCache[questID] end
-
+-- Snapshot the current reward pool for whatever quest is showing in the dialog.
+local function SnapshotPool()
     local dialog = AdventureMapQuestChoiceDialog
-    if not (dialog and dialog.ShowWithQuest) then
-        return {}  -- don't cache — dialog may not be ready yet
-    end
-
-    local prevAlpha = dialog:GetAlpha()
-    dialog:SetAlpha(0)
-    dialog:Hide()  -- always start from a clean state
-    dialog:ShowWithQuest(CovenantMissionFrame, PH.FindPin(questID), questID)
-
+    if not (dialog and dialog.rewardPool) then return {} end
     local rewards = {}
-    if dialog.rewardPool then
-        for reward in dialog.rewardPool:EnumerateActive() do
-            local name  = reward.Name  and reward.Name:GetText()
-            local count = reward.Count and reward.Count:GetText()
-            if name and name ~= "" then
-                rewards[#rewards + 1] = {
-                    name      = name,
-                    icon      = GetRewardIcon(name),
-                    count     = (count and count ~= "" and count ~= "1") and count or nil,
-                    sortOrder = RewardSortKey(name),
-                }
-            end
+    for reward in dialog.rewardPool:EnumerateActive() do
+        local name  = reward.Name  and reward.Name:GetText()
+        local count = reward.Count and reward.Count:GetText()
+        if name and name ~= "" then
+            rewards[#rewards + 1] = {
+                name      = name,
+                icon      = GetRewardIcon(name),
+                count     = (count and count ~= "" and count ~= "1") and count or nil,
+                sortOrder = RewardSortKey(name),
+            }
         end
     end
-
     table.sort(rewards, function(a, b) return a.sortOrder < b.sortOrder end)
-
-    dialog:Hide()
-    dialog:SetAlpha(prevAlpha)
-
-    PH.rewardCache[questID] = rewards
     return rewards
 end
 
--- Warm the cache for all live hunts — call this before RefreshRows
-function PH.WarmRewardCache()
-    wipe(PH.rewardCache)
-    for _, hunt in ipairs(PH.liveHunts) do
-        PH.GetRewards(hunt.questID)
+-- ---------------------------------------------------------------------------
+-- Sequential async warmer
+--
+-- Processes one quest at a time. For each quest:
+--   1. ShowWithQuest (dialog hidden) to trigger server item data fetch.
+--   2. Poll SnapshotPool every POLL_MS until the reward count is identical
+--      for STABLE_NEEDED consecutive polls — meaning the pool has settled.
+--   3. If count stays 0 for too long, or total time exceeds TIMEOUT_S, give up.
+--   4. Commit result, call onProgress, move to next quest.
+-- onProgress(done, total) called after each quest.
+-- onDone() called when all quests are finished.
+-- ---------------------------------------------------------------------------
+local POLL_MS       = 0.10   -- poll interval
+local STABLE_NEEDED = 3      -- consecutive identical non-zero reads before commit
+local TIMEOUT_S     = 4.0    -- hard per-quest timeout
+
+function PH.WarmRewardCacheAsync(onProgress, onDone)
+    local dialog = AdventureMapQuestChoiceDialog
+    if not (dialog and dialog.ShowWithQuest) then
+        C_Timer.After(0.4, function() PH.WarmRewardCacheAsync(onProgress, onDone) end)
+        return
     end
+
+    -- Only queue quests not yet cached
+    local queue = {}
+    for _, hunt in ipairs(PH.liveHunts) do
+        if PH.rewardCache[hunt.questID] == nil then
+            queue[#queue + 1] = hunt
+        end
+    end
+
+    local total     = #PH.liveHunts  -- for progress display
+    local doneCount = total - #queue  -- already cached from a previous warm
+
+    if #queue == 0 then
+        if onDone then onDone() end
+        return
+    end
+
+    local prevAlpha = dialog:GetAlpha()
+    local cancelled = false
+    local ticker    = nil
+
+    PH._rewardWarmCancel = function()
+        cancelled = true
+        if ticker then ticker:Cancel(); ticker = nil end
+        dialog:Hide()
+        dialog:SetAlpha(prevAlpha)
+        PH._rewardWarmCancel = nil
+    end
+
+    local StartNext  -- forward declare
+    local qIdx      = 1
+    local elapsed   = 0
+    local lastCount = -1
+    local stableN   = 0
+
+    local function CleanupTicker()
+        if ticker then ticker:Cancel(); ticker = nil end
+    end
+
+    local function CommitAndAdvance(rewards)
+        CleanupTicker()
+        dialog:Hide()
+        dialog:SetAlpha(prevAlpha)
+
+        PH.rewardCache[queue[qIdx].questID] = rewards
+        doneCount = doneCount + 1
+        if onProgress then onProgress(doneCount, total) end
+
+        qIdx = qIdx + 1
+        if qIdx > #queue then
+            PH._rewardWarmCancel = nil
+            if onDone then onDone() end
+            return
+        end
+
+        -- Brief gap so the dialog fully tears down before next ShowWithQuest
+        C_Timer.After(0.05, function()
+            if cancelled then return end
+            StartNext()
+        end)
+    end
+
+    StartNext = function()
+        if cancelled then return end
+        elapsed   = 0
+        lastCount = -1
+        stableN   = 0
+
+        local hunt = queue[qIdx]
+        local pin  = PH.FindPin(hunt.questID)
+        if not pin then
+            CommitAndAdvance({})
+            return
+        end
+
+        dialog:SetAlpha(0)
+        dialog:Hide()
+        dialog:ShowWithQuest(CovenantMissionFrame, pin, hunt.questID)
+
+        ticker = C_Timer.NewTicker(POLL_MS, function()
+            if cancelled then return end
+            elapsed = elapsed + POLL_MS
+
+            local rewards = SnapshotPool()
+            local n = #rewards
+
+            if n > 0 and n == lastCount then
+                stableN = stableN + 1
+                if stableN >= STABLE_NEEDED then
+                    CommitAndAdvance(rewards)
+                    return
+                end
+            else
+                -- Count changed or first read — reset stability window
+                stableN   = 0
+                lastCount = n
+            end
+
+            if elapsed >= TIMEOUT_S then
+                -- Take whatever we have and move on
+                CommitAndAdvance(rewards)
+            end
+        end)
+    end
+
+    StartNext()
 end
+
+function PH.WarmRewardCache() end  -- legacy stub
+
+-- ---------------------------------------------------------------------------
+-- State helpers
+-- ---------------------------------------------------------------------------
 PH.filter = { difficulty = "All" }
 
 function PH.IsInProgress(questID)

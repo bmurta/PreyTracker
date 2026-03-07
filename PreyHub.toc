@@ -1,8 +1,9 @@
 ## Interface: 120001
 ## Title: PreyHub
-## Notes: A sleek view for Prey Hunt Table — see all active hunts with difficulty, zone and rewards at a glance.
+## Notes: A view for the Prey Hunt Table — see all active hunts with difficulty, zone and rewards at a glance.
 ## Author: Valash
 ## Version: 1.0
+## SavedVariables: PreyHubDB
 
 Core.lua
 Config.lua

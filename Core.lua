@@ -1,26 +1,90 @@
--- =============================================================================
---  PreyHub — Core.lua
---  Addon entry point: global table, hooks, events, slash commands.
---  Load order: Core → Config → Data → UI
--- =============================================================================
+-- PreyHub — Core.lua
+PreyHub = PreyHub or {}
+local PH = PreyHub
 
--- Global namespace — created first so all files can reference it
-_G.PreyHub = {}
-local PH = _G.PreyHub
-
--- ---------------------------------------------------------------------------
--- Hooks
--- ---------------------------------------------------------------------------
 local hookApplied = false
 local function HookMissionFrame()
     if hookApplied then return end
 
     hooksecurefunc("ShowUIPanel", function(frame)
         if frame and frame:GetName() == "CovenantMissionFrame" then
-            C_Timer.After(0.5, function()
+            -- Poll until the pin pool stops growing, then proceed.
+            -- This handles slow clients where pins trickle in after the frame opens.
+            local PIN_POLL     = 0.15  -- check interval
+            local STABLE_READS = 3     -- identical non-zero counts before committing
+            local MAX_WAIT     = 6.0   -- give up after this long
+            local lastCount    = -1
+            local stableN      = 0
+            local elapsed      = 0
+            local ticker
+
+            local function Proceed()
+                if ticker then ticker:Cancel(); ticker = nil end
+                if not (CovenantMissionFrame and CovenantMissionFrame:IsShown()) then return end
+
+                PH.standalone = false
                 PH.RefreshFromPins()
-                PH.WarmRewardCache()
-                PH.ShowPanel()
+
+                local cacheWarm = true
+                for _, h in ipairs(PH.liveHunts) do
+                    if PH.rewardCache[h.questID] == nil then
+                        cacheWarm = false
+                        break
+                    end
+                end
+
+                if cacheWarm then
+                    PH.ShowPanel()
+                    return
+                end
+
+                PH.ShowLoadingFrame(0, #PH.liveHunts)
+                PH.WarmRewardCacheAsync(
+                    function(done, total)
+                        if CovenantMissionFrame and CovenantMissionFrame:IsShown() then
+                            PH.ShowLoadingFrame(done, total)
+                        end
+                    end,
+                    function()
+                        if CovenantMissionFrame and CovenantMissionFrame:IsShown() then
+                            PH.ShowPanel()
+                        else
+                            PH.HideLoadingFrame()
+                        end
+                    end
+                )
+            end
+
+            local function CountPins()
+                local pool = CovenantMissionFrame
+                    and CovenantMissionFrame.MapTab
+                    and CovenantMissionFrame.MapTab.pinPools
+                    and CovenantMissionFrame.MapTab.pinPools["AdventureMap_QuestOfferPinTemplate"]
+                if not pool then return 0 end
+                local n = 0
+                for _ in pool:EnumerateActive() do n = n + 1 end
+                return n
+            end
+
+            ticker = C_Timer.NewTicker(PIN_POLL, function()
+                if not (CovenantMissionFrame and CovenantMissionFrame:IsShown()) then
+                    ticker:Cancel(); ticker = nil
+                    return
+                end
+                elapsed = elapsed + PIN_POLL
+                local n = CountPins()
+                if n > 0 and n == lastCount then
+                    stableN = stableN + 1
+                    if stableN >= STABLE_READS then
+                        Proceed()
+                    end
+                else
+                    stableN   = 0
+                    lastCount = n
+                end
+                if elapsed >= MAX_WAIT then
+                    Proceed()
+                end
             end)
         end
     end)
@@ -31,48 +95,59 @@ local function HookMissionFrame()
         end
     end)
 
-    -- Watchdog: catches cases where the frame closes without HideUIPanel firing.
-    -- Throttled to once per second to avoid per-frame overhead.
     local elapsed = 0
     local watchdog = CreateFrame("Frame")
     watchdog:SetScript("OnUpdate", function(_, dt)
         elapsed = elapsed + dt
         if elapsed < 1 then return end
         elapsed = 0
-        if PH.panel and PH.panel:IsShown()
-           and CovenantMissionFrame and not CovenantMissionFrame:IsShown() then
-            PH.HidePanel()
+        if CovenantMissionFrame and not CovenantMissionFrame:IsShown() then
+            -- HidePanel is a no-op in standalone mode, so this is safe
+            if PH.panel and PH.panel:IsShown() then
+                PH.HidePanel()
+            end
         end
     end)
 
     hookApplied = true
 end
 
--- ---------------------------------------------------------------------------
--- Slash commands
--- ---------------------------------------------------------------------------
 SLASH_PREYHUB1 = "/prey"
 SLASH_PREYHUB2 = "/preyhub"
 SlashCmdList["PREYHUB"] = function(msg)
     local cmd = msg:lower():match("^%s*(.-)%s*$")
-    PH.BuildPanel()
     if cmd == "hide" then
-        PH.HidePanel()
+        PH.ForceHidePanel()
     elseif cmd == "reset" then
+        PH.BuildPanel()
         PH.panel:ClearAllPoints()
         PH.panel:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
-        PH.RefreshFromPins()
+        PH.standalone = true
         PH.ShowPanel()
     else
-        -- "show" or bare toggle
-        if PH.panel:IsShown() and cmd ~= "show" then PH.HidePanel()
-        else PH.RefreshFromPins() PH.ShowPanel() end
+        PH.BuildPanel()
+        if PH.panel:IsShown() and cmd ~= "show" then
+            PH.ForceHidePanel()
+        else
+            PH.standalone = true
+            PH.RefreshFromPins()
+            local cacheWarm = true
+            for _, h in ipairs(PH.liveHunts) do
+                if PH.rewardCache[h.questID] == nil then cacheWarm = false; break end
+            end
+            if cacheWarm then
+                PH.ShowPanel()
+            else
+                PH.ShowLoadingFrame(0, #PH.liveHunts)
+                PH.WarmRewardCacheAsync(
+                    function(done, total) PH.ShowLoadingFrame(done, total) end,
+                    function() PH.ShowPanel() end
+                )
+            end
+        end
     end
 end
 
--- ---------------------------------------------------------------------------
--- Events
--- ---------------------------------------------------------------------------
 local frame = CreateFrame("Frame")
 frame:RegisterEvent("ADDON_LOADED")
 frame:RegisterEvent("PLAYER_ENTERING_WORLD")
@@ -83,10 +158,10 @@ frame:SetScript("OnEvent", function(_, event, arg1)
     if event == "ADDON_LOADED" and arg1 == "PreyHub" then
         HookMissionFrame()
         PH.CreateMinimapButton()
-        print("|cffcc44ccPreyHub|r loaded — /prey to toggle.")
+        print("|cffcc44ccPreyHub|r loaded. /prey to toggle.")
 
     elseif event == "PLAYER_ENTERING_WORLD" then
-        HookMissionFrame()  -- safe no-op if already applied
+        HookMissionFrame()
 
     elseif event == "QUEST_LOG_UPDATE" then
         if PH.panel and PH.panel:IsShown() then PH.RefreshRows() end
