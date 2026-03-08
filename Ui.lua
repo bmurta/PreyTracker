@@ -473,7 +473,7 @@ function PH.BuildPanel()
     -- Title
     panel.titleText = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
     panel.titleText:SetPoint("TOPLEFT", panel, "TOPLEFT", 14, -12)
-    panel.titleText:SetText("|cffcc44ccPrey|r|cffddddddHub|r")
+    panel.titleText:SetText("|cffcc44ccPrey|r|cffddddddTracker|r")
 
     -- Anguish currency
     panel.anguishText = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
@@ -622,7 +622,7 @@ local function BuildMapOverlay()
     -- Title line
     local title = card:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     title:SetPoint("TOP", card, "TOP", 0, -14)
-    title:SetText("|cffcc44ccPrey|r|cffddddddHub|r  |cff666677—|r  |cffaaaabbLoading reward data...|r")
+    title:SetText("|cffcc44ccPrey|r|cffddddddTracker|r  |cff666677—|r  |cffaaaabbLoading reward data...|r")
 
     -- Progress bar track
     local barW = cardW - 40
@@ -680,7 +680,7 @@ local function BuildLoadingFrame()
     -- Title
     local title = loadFrame:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
     title:SetPoint("TOPLEFT", loadFrame, "TOPLEFT", 14, -12)
-    title:SetText("|cffcc44ccPrey|r|cffddddddHub|r")
+    title:SetText("|cffcc44ccPrey|r|cffddddddTracker|r")
 
     -- Center label
     local label = loadFrame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
