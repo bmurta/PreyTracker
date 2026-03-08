@@ -1,6 +1,6 @@
--- PreyHub — Core.lua
-PreyHub = PreyHub or {}
-local PH = PreyHub
+-- PreyTracker — Core.lua
+PreyTracker = PreyTracker or {}
+local PH = PreyTracker
 
 local hookApplied = false
 local function HookMissionFrame()
@@ -112,9 +112,9 @@ local function HookMissionFrame()
     hookApplied = true
 end
 
-SLASH_PREYHUB1 = "/prey"
-SLASH_PREYHUB2 = "/preyhub"
-SlashCmdList["PREYHUB"] = function(msg)
+SLASH_PREYTRACKER1 = "/prey"
+SLASH_PREYTRACKER2 = "/preytracker"
+SlashCmdList["PREYTRACKER"] = function(msg)
     local cmd = msg:lower():match("^%s*(.-)%s*$")
     if cmd == "hide" then
         PH.ForceHidePanel()
@@ -155,10 +155,10 @@ frame:RegisterEvent("QUEST_LOG_UPDATE")
 frame:RegisterEvent("CURRENCY_DISPLAY_UPDATE")
 
 frame:SetScript("OnEvent", function(_, event, arg1)
-    if event == "ADDON_LOADED" and arg1 == "PreyHub" then
+    if event == "ADDON_LOADED" and arg1 == "PreyTracker" then
         HookMissionFrame()
         PH.CreateMinimapButton()
-        print("|cffcc44ccPreyHub|r loaded. /prey to toggle.")
+        print("|cffcc44ccPreyTracker|r loaded. /prey to toggle.")
 
     elseif event == "PLAYER_ENTERING_WORLD" then
         HookMissionFrame()

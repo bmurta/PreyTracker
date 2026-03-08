@@ -1,9 +1,9 @@
 ## Interface: 120001
-## Title: PreyHub
+## Title: PreyTracker
 ## Notes: A side view for Prey Hunt Table — see all active hunts with difficulty, zone and rewards at a glance.
 ## Author: Valash
 ## Version: 1.0.1
-## SavedVariables: PreyHubDB
+## SavedVariables: PreyTrackerDB
 
 Libs\LibStub.lua
 Libs\LibDataBroker-1.1.lua

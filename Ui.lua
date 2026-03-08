@@ -1,5 +1,5 @@
--- PreyHub — UI.lua
-local PH  = PreyHub
+-- PreyTracker — UI.lua
+local PH  = PreyTracker
 local CFG = PH.CFG
 
 local WHITE = "Interface\\Buttons\\WHITE8X8"
@@ -441,7 +441,7 @@ end
 function PH.BuildPanel()
     if PH.panel then return end
 
-    local panel = CreateFrame("Frame", "PreyHubPanel", UIParent)
+    local panel = CreateFrame("Frame", "PreyTrackerPanel", UIParent)
     panel:SetSize(CFG.PANEL_WIDTH, CFG.PANEL_HEIGHT)
     panel:SetFrameStrata("DIALOG")
     panel:SetFrameLevel(200)
@@ -539,7 +539,7 @@ function PH.BuildPanel()
     panel.emptyState = es
 
     -- Scroll frame
-    local sf = CreateFrame("ScrollFrame", "PreyHubScroll", panel, "UIPanelScrollFrameTemplate")
+    local sf = CreateFrame("ScrollFrame", "PreyTrackerScroll", panel, "UIPanelScrollFrameTemplate")
     sf:SetPoint("TOPLEFT",     panel, "TOPLEFT",     8,  -TOP_CONTENT)
     sf:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -22, 8)
 
@@ -588,7 +588,7 @@ local function BuildMapOverlay()
 
     -- Parent to UIParent (not CovenantMissionFrame) so we can place it above
     -- the map without being clipped by it.
-    mapOverlay = CreateFrame("Frame", "PreyHubMapOverlay", UIParent)
+    mapOverlay = CreateFrame("Frame", "PreyTrackerMapOverlay", UIParent)
     mapOverlay:SetFrameStrata("DIALOG")
     mapOverlay:SetFrameLevel(210)  -- above CovenantMissionFrame
     mapOverlay:Hide()
@@ -655,7 +655,7 @@ end
 local function BuildLoadingFrame()
     if loadFrame then return end
 
-    loadFrame = CreateFrame("Frame", "PreyHubLoading", UIParent)
+    loadFrame = CreateFrame("Frame", "PreyTrackerLoading", UIParent)
     loadFrame:SetSize(CFG.PANEL_WIDTH, CFG.PANEL_HEIGHT)
     loadFrame:SetFrameStrata("DIALOG")
     loadFrame:SetFrameLevel(199)
@@ -783,8 +783,8 @@ end
 -- Minimap button
 -- ---------------------------------------------------------------------------
 function PH.CreateMinimapButton()
-    if not PreyHubDB then PreyHubDB = {} end
-    if PreyHubDB.minimap == nil then PreyHubDB.minimap = {} end
+    if not PreyTrackerDB then PreyTrackerDB = {} end
+    if PreyTrackerDB.minimap == nil then PreyTrackerDB.minimap = {} end
 
     -- -----------------------------------------------------------------------
     -- Path A: LibDBIcon (handles ElvUI, MBB, every other manager addon)
@@ -792,9 +792,9 @@ function PH.CreateMinimapButton()
     local LDB    = LibStub and LibStub("LibDataBroker-1.1", true)
     local LDBIcon = LibStub and LibStub("LibDBIcon-1.0", true)
     if LDB and LDBIcon then
-        local broker = LDB:NewDataObject("PreyHub", {
+        local broker = LDB:NewDataObject("PreyTracker", {
             type  = "launcher",
-            label = "PreyHub",
+            label = "PreyTracker",
             icon  = "Interface\\Icons\\Ui_prey",
             OnClick = function(_, button)
                 if button ~= "LeftButton" then return end
@@ -820,21 +820,21 @@ function PH.CreateMinimapButton()
                 end
             end,
             OnTooltipShow = function(tt)
-                tt:AddLine("PreyHub", 0.85, 0.5, 1.0)
+                tt:AddLine("PreyTracker", 0.85, 0.5, 1.0)
                 tt:AddLine("Toggle Prey Hunt panel", 0.7, 0.7, 0.75)
             end,
         })
-        LDBIcon:Register("PreyHub", broker, PreyHubDB.minimap)
+        LDBIcon:Register("PreyTracker", broker, PreyTrackerDB.minimap)
         return
     end
 
     -- -----------------------------------------------------------------------
     -- Path B: Manual fallback (no LibDBIcon installed)
     -- -----------------------------------------------------------------------
-    if not PreyHubDB.minimapAngle then PreyHubDB.minimapAngle = 225 end
+    if not PreyTrackerDB.minimapAngle then PreyTrackerDB.minimapAngle = 225 end
     local RADIUS = 80
 
-    local btn = CreateFrame("Button", "PreyHubMinimapBtn", Minimap)
+    local btn = CreateFrame("Button", "PreyTrackerMinimapBtn", Minimap)
     btn:SetSize(31, 31)
     btn:SetFrameStrata("MEDIUM")
     btn:SetFrameLevel(8)
@@ -858,14 +858,14 @@ function PH.CreateMinimapButton()
     hl:SetBlendMode("ADD")
 
     local function SetAngle(deg)
-        PreyHubDB.minimapAngle = deg
+        PreyTrackerDB.minimapAngle = deg
         local rad = math.rad(deg)
         btn:ClearAllPoints()
         btn:SetPoint("CENTER", Minimap, "CENTER",
             math.cos(rad) * RADIUS,
             math.sin(rad) * RADIUS)
     end
-    SetAngle(PreyHubDB.minimapAngle)
+    SetAngle(PreyTrackerDB.minimapAngle)
 
     btn:RegisterForDrag("LeftButton")
     btn:SetScript("OnDragStart", function(self)
@@ -906,7 +906,7 @@ function PH.CreateMinimapButton()
     end)
     btn:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_LEFT")
-        GameTooltip:AddLine("PreyHub", 0.85, 0.5, 1.0)
+        GameTooltip:AddLine("PreyTracker", 0.85, 0.5, 1.0)
         GameTooltip:AddLine("Toggle Prey Hunt panel", 0.7, 0.7, 0.75)
         GameTooltip:AddLine(" ")
         GameTooltip:AddLine("|cff888888Drag to reposition|r", 0.5, 0.5, 0.5)

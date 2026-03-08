@@ -1,5 +1,5 @@
--- PreyHub — Config.lua
-local PH = PreyHub
+-- PreyTracker — Config.lua
+local PH = PreyTracker
 
 PH.CFG = {
     PANEL_WIDTH            = 290,

@@ -1,5 +1,5 @@
--- PreyHub — Data.lua
-local PH  = PreyHub
+-- PreyTracker — Data.lua
+local PH  = PreyTracker
 local CFG = PH.CFG
 
 PH.liveHunts   = {}
