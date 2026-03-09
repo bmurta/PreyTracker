@@ -2,6 +2,9 @@
 PreyTracker = PreyTracker or {}
 local PH = PreyTracker
 
+-- ---------------------------------------------------------------------------
+-- Mission frame hook
+-- ---------------------------------------------------------------------------
 local hookApplied = false
 local function HookMissionFrame()
     if hookApplied then return end
@@ -9,10 +12,10 @@ local function HookMissionFrame()
     hooksecurefunc("ShowUIPanel", function(frame)
         if frame and frame:GetName() == "CovenantMissionFrame" then
             -- Poll until the pin pool stops growing, then proceed.
-            -- This handles slow clients where pins trickle in after the frame opens.
-            local PIN_POLL     = 0.15  -- check interval
+            -- Handles slow clients where pins trickle in after the frame opens.
+            local PIN_POLL     = 0.15  -- check interval (seconds)
             local STABLE_READS = 3     -- identical non-zero counts before committing
-            local MAX_WAIT     = 6.0   -- give up after this long
+            local MAX_WAIT     = 6.0   -- give up after this many seconds
             local lastCount    = -1
             local stableN      = 0
             local elapsed      = 0
@@ -75,16 +78,12 @@ local function HookMissionFrame()
                 local n = CountPins()
                 if n > 0 and n == lastCount then
                     stableN = stableN + 1
-                    if stableN >= STABLE_READS then
-                        Proceed()
-                    end
+                    if stableN >= STABLE_READS then Proceed() end
                 else
                     stableN   = 0
                     lastCount = n
                 end
-                if elapsed >= MAX_WAIT then
-                    Proceed()
-                end
+                if elapsed >= MAX_WAIT then Proceed() end
             end)
         end
     end)
@@ -95,6 +94,7 @@ local function HookMissionFrame()
         end
     end)
 
+    -- Watchdog: catches edge cases where HideUIPanel is never fired
     local elapsed = 0
     local watchdog = CreateFrame("Frame")
     watchdog:SetScript("OnUpdate", function(_, dt)
@@ -102,7 +102,6 @@ local function HookMissionFrame()
         if elapsed < 1 then return end
         elapsed = 0
         if CovenantMissionFrame and not CovenantMissionFrame:IsShown() then
-            -- HidePanel is a no-op in standalone mode, so this is safe
             if PH.panel and PH.panel:IsShown() then
                 PH.HidePanel()
             end
@@ -112,18 +111,33 @@ local function HookMissionFrame()
     hookApplied = true
 end
 
+-- ---------------------------------------------------------------------------
+-- Slash commands
+-- ---------------------------------------------------------------------------
 SLASH_PREYTRACKER1 = "/prey"
 SLASH_PREYTRACKER2 = "/preytracker"
 SlashCmdList["PREYTRACKER"] = function(msg)
     local cmd = msg:lower():match("^%s*(.-)%s*$")
-    if cmd == "hide" then
+
+    if cmd == "bar" then
+        PH.ToggleProgressBar()
+
+    elseif cmd == "bar reset" then
+        PH.ResetProgressBarPosition()
+
+    elseif cmd == "widget" then
+        PH.ToggleBlizzWidget()
+
+    elseif cmd == "hide" then
         PH.ForceHidePanel()
+
     elseif cmd == "reset" then
         PH.BuildPanel()
         PH.panel:ClearAllPoints()
         PH.panel:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
         PH.standalone = true
         PH.ShowPanel()
+
     else
         PH.BuildPanel()
         if PH.panel:IsShown() and cmd ~= "show" then
@@ -148,6 +162,9 @@ SlashCmdList["PREYTRACKER"] = function(msg)
     end
 end
 
+-- ---------------------------------------------------------------------------
+-- Events
+-- ---------------------------------------------------------------------------
 local frame = CreateFrame("Frame")
 frame:RegisterEvent("ADDON_LOADED")
 frame:RegisterEvent("PLAYER_ENTERING_WORLD")
@@ -158,7 +175,7 @@ frame:SetScript("OnEvent", function(_, event, arg1)
     if event == "ADDON_LOADED" and arg1 == "PreyTracker" then
         HookMissionFrame()
         PH.CreateMinimapButton()
-        print("|cffcc44ccPreyTracker|r loaded. /prey to toggle.")
+        print("|cffcc44ccPreyTracker|r loaded. /prey to toggle  ·  /prey bar  ·  /prey widget  ·  /prey bar reset")
 
     elseif event == "PLAYER_ENTERING_WORLD" then
         HookMissionFrame()

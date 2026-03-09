@@ -2,8 +2,9 @@
 ## Title: PreyTracker
 ## Notes: A side view for Prey Hunt Table — see all active hunts with difficulty, zone and rewards at a glance.
 ## Author: Valash
-## Version: 1.0.1
+## Version: 1.0.2
 ## SavedVariables: PreyTrackerDB
+## SavedVariablesPerAccount: PreyTrackerAccountDB
 
 Libs\LibStub.lua
 Libs\LibDataBroker-1.1.lua
@@ -13,3 +14,4 @@ Core.lua
 Config.lua
 Data.lua
 UI.lua
+Progress.lua
