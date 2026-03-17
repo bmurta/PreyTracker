@@ -20,7 +20,7 @@ local function GetZoneFromCoords(x, y)
     if not x or not y then return nil end
     if x > 0.70              then return "Harandar"      end
     if x > 0.40 and y < 0.40 then return "Voidstorm"     end
-    if y > 0.55              then return "Zul'Aman"       end
+    if x > 0.40 and y > 0.55 then return "Zul'Aman"      end
     return "Eversong Woods"
 end
 
@@ -61,6 +61,18 @@ function PH.RefreshFromPins()
             end
         end
     end
+
+    -- Deduplicate: max 1 prey per (difficulty, zone) combination
+    local seen    = {}
+    local deduped = {}
+    for _, h in ipairs(newHunts) do
+        local key = h.difficulty .. ":" .. (h.zone or "")
+        if not seen[key] then
+            seen[key] = true
+            deduped[#deduped + 1] = h
+        end
+    end
+    newHunts = deduped
 
     -- Check if the set of quest IDs is identical to what we already have
     local cacheValid = (#newHunts == #PH.liveHunts)
