@@ -32,18 +32,20 @@ PH.DIFF_ORDER = { Nightmare = 1, Hard = 2, Normal = 3 }
 PH.ZONE_ORDER = { ["Eversong Woods"] = 1, ["Zul'Aman"] = 2, Harandar = 3, Voidstorm = 4 }
 
 PH.REWARD_ICONS = {
-    { match = "Champion Dawncrest",         icon = "Interface\\Icons\\inv_120_crest_champion"    },
-    { match = "Veteran Dawncrest",          icon = "Interface\\Icons\\inv_120_crest_veteran"     },
-    { match = "Adventurer Dawncrest",       icon = "Interface\\Icons\\inv_120_crest_adventurer"  },
-    { match = "Champion Chest",             icon = "Interface\\Icons\\inv_misc_treasurechest04d" },
-    { match = "Veteran Chest",              icon = "Interface\\Icons\\inv_misc_treasurechest04d" },
-    { match = "Adventurer Chest",           icon = "Interface\\Icons\\inv_misc_treasurechest04a" },
-    { match = "Aspiring Preyseeker's Chest",icon = "Interface\\Icons\\inv_misc_treasurechest04a" },
-    { match = "Champion Sack",              icon = "Interface\\Icons\\inv_misc_bag_10_red"       },
-    { match = "Veteran Sack",               icon = "Interface\\Icons\\inv_misc_bag_10_red"       },
-    { match = "Adventurer Sack",            icon = "Interface\\Icons\\inv_misc_bag_10_red"       },
-    { match = "Preyseeker's Journey",       icon = "Interface\\Icons\\ui_prey"                   },
-    { match = "Player Experience",          icon = "Interface\\Icons\\xp_icon"                   },
+    { match = "Hero Dawncrest",             icon = "Interface\\Icons\\inv_120_crest_hero"              },
+    { match = "Champion Dawncrest",         icon = "Interface\\Icons\\inv_120_crest_champion"          },
+    { match = "Veteran Dawncrest",          icon = "Interface\\Icons\\inv_120_crest_veteran"           },
+    { match = "Adventurer Dawncrest",       icon = "Interface\\Icons\\inv_120_crest_adventurer"        },
+    { match = "Champion Chest",             icon = "Interface\\Icons\\inv_misc_treasurechest04d"       },
+    { match = "Veteran Chest",              icon = "Interface\\Icons\\inv_misc_treasurechest04d"       },
+    { match = "Adventurer Chest",           icon = "Interface\\Icons\\inv_misc_treasurechest04a"       },
+    { match = "Aspiring Preyseeker's Chest",icon = "Interface\\Icons\\inv_misc_treasurechest04a"      },
+    { match = "Champion Sack",              icon = "Interface\\Icons\\inv_misc_bag_10_red"             },
+    { match = "Veteran Sack",               icon = "Interface\\Icons\\inv_misc_bag_10_red"             },
+    { match = "Adventurer Sack",            icon = "Interface\\Icons\\inv_misc_bag_10_red"             },
+    { match = "Coffer Key Shard",           icon = "Interface\\Icons\\inv_gizmo_hardenedadamantitetube"},
+    { match = "Preyseeker's Journey",       icon = "Interface\\Icons\\ui_prey"                         },
+    { match = "Player Experience",          icon = "Interface\\Icons\\xp_icon"                         },
 }
 
 PH.FALLBACK_ICON = "Interface\\Icons\\inv_misc_questionmark"

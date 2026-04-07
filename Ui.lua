@@ -170,7 +170,7 @@ local function AcquireRow()
 
     -- Reward icons — each anchored to row BOTTOMLEFT with absolute offset
     row.rewardIcons = {}
-    for i = 1, 4 do
+    for i = 1, 5 do
         row.rewardIcons[i] = MakeRewardIcon(row, i)
     end
 
@@ -257,7 +257,7 @@ local function PopulateRow(row, hunt)
     row.diffBadge:SetTextColor(dc.r, dc.g, dc.b)
 
     -- Reward icons
-    for i = 1, 4 do
+    for i = 1, 5 do
         local ic = row.rewardIcons[i]
         local r  = rewards[i]
         if r then
