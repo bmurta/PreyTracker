@@ -2,7 +2,7 @@
 ## Title: PreyTracker
 ## Notes: A side view for Prey Hunt Table — see all active hunts with difficulty, zone and rewards at a glance.
 ## Author: Valash
-## Version: 1.0.3
+## Version: 1.0.4
 ## SavedVariables: PreyTrackerDB
 ## SavedVariablesPerAccount: PreyTrackerAccountDB
 
