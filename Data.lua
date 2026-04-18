@@ -20,9 +20,42 @@ local function GetZoneFromCoords(x, y)
     if not x or not y then return nil end
     if x > 0.70              then return "Harandar"      end
     if x > 0.40 and y < 0.40 then return "Voidstorm"     end
-    if y > 0.55              then return "Zul'Aman"       end
+    if x > 0.36 and y > 0.55 then return "Zul'Aman"      end
     return "Eversong Woods"
 end
+
+local function GetAchievementState(difficulty, getNum)
+    local achievement_remaining = {}
+
+    local achievement_id = 0
+    if difficulty == 'Normal' then
+        -- Normal III
+        achievement_id = 42701
+    elseif difficulty == 'Hard' then
+        -- Hard III
+        achievement_id = 42702
+    elseif difficulty == 'Nightmare' then
+        -- Nightmare III
+        achievement_id = 42703
+    else 
+        -- Gotta Hunt Them All
+        achievement_id = 62383
+    end
+
+    local numCriteria = GetAchievementNumCriteria(achievement_id)
+    for i = 1, numCriteria do
+        local criteriaString, _, isCompleted = GetAchievementCriteriaInfo(achievement_id, i)
+        if criteriaString and criteriaString ~= "" and not isCompleted then
+            table.insert(achievement_remaining, criteriaString)
+        end
+    end
+    if getNum then
+        return 30 - #achievement_remaining
+    else
+        return table.concat(achievement_remaining, ' ')
+    end
+end
+
 
 -- ---------------------------------------------------------------------------
 -- Pins
@@ -48,19 +81,53 @@ function PH.RefreshFromPins()
     -- Collect new pins first without wiping anything yet
     local newHunts = {}
     local newIDs   = {}
+    PH.achievement_remaining = {
+        All={
+            names=GetAchievementState('All'), 
+            remaining=GetAchievementState('All', true)
+        },
+        Normal={
+            names=GetAchievementState('Normal'), 
+            remaining=GetAchievementState('Normal', true)
+        }, 
+        Hard={
+            names=GetAchievementState('Hard'), 
+            remaining=GetAchievementState('Hard', true)
+        }, 
+        Nightmare={
+            names=GetAchievementState('Nightmare'),
+            remaining=GetAchievementState('Nightmare', true)
+        }
+    }
     if pool then
         for pin in pool:EnumerateActive() do
             if pin.questID and pin.title then
+                local difficulty = ParseDifficulty(pin.description)
                 newHunts[#newHunts + 1] = {
                     name       = pin.title,
-                    difficulty = ParseDifficulty(pin.description),
+                    difficulty = difficulty,
                     questID    = pin.questID,
                     zone       = GetZoneFromCoords(pin.normalizedX, pin.normalizedY),
+                    achievement_all = not string.find(PH.achievement_remaining.All.names, pin.title),
+                    achievement_diff = not string.find(PH.achievement_remaining[difficulty].names, pin.title)
                 }
                 newIDs[pin.questID] = true
             end
         end
     end
+
+    -- Deduplicate: max 1 prey per (difficulty, zone) combination
+    local seen    = {}
+    local deduped = {}
+    for _, h in ipairs(newHunts) do
+        local key = h.difficulty .. ":" .. (h.zone or "")
+        if not seen[key] then
+            seen[key] = true
+            deduped[#deduped + 1] = h
+        end
+    end
+
+    newHunts = deduped
 
     -- Check if the set of quest IDs is identical to what we already have
     local cacheValid = (#newHunts == #PH.liveHunts)
@@ -109,10 +176,19 @@ local function GetRewardIcon(name)
     return PH.FALLBACK_ICON
 end
 
-local REWARD_SORT = { ["Dawncrest"]=1, ["Chest"]=2, ["Sack"]=3, ["Journey"]=4 }
+-- Ordered list so "Hero Dawncrest" (order 1) is checked before the generic
+-- "Dawncrest" pattern (order 2), preventing Hero from matching the wrong bucket.
+local REWARD_SORT = {
+    { match = "Hero Dawncrest",  order = 1 },
+    { match = "Dawncrest",       order = 2 },
+    { match = "Chest",           order = 3 },
+    { match = "Sack",            order = 3 },
+    { match = "Coffer Key Shard",order = 4 },
+    { match = "Journey",         order = 5 },
+}
 local function RewardSortKey(name)
-    for pattern, order in pairs(REWARD_SORT) do
-        if name:find(pattern, 1, true) then return order end
+    for _, entry in ipairs(REWARD_SORT) do
+        if name:find(entry.match, 1, true) then return entry.order end
     end
     return 99
 end

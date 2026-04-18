@@ -158,6 +158,10 @@ local function AcquireRow()
     row.statusText = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     row.statusText:SetPoint("TOPLEFT", row.nameText, "BOTTOMLEFT", 0, -3)
 
+    -- Achievement Status line (Available / In Progress)
+    row.achievementText = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    row.achievementText:SetPoint("TOPLEFT", row.statusText, "BOTTOMLEFT", 0, -3)
+
     -- Difficulty badge (top-right)
     row.diffBadge = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     row.diffBadge:SetPoint("TOPRIGHT", row, "TOPRIGHT", -10, -8)
@@ -170,7 +174,7 @@ local function AcquireRow()
 
     -- Reward icons — each anchored to row BOTTOMLEFT with absolute offset
     row.rewardIcons = {}
-    for i = 1, 4 do
+    for i = 1, 5 do
         row.rewardIcons[i] = MakeRewardIcon(row, i)
     end
 
@@ -248,6 +252,24 @@ local function PopulateRow(row, hunt)
         end)
     end
 
+    local achi_all = "|cffdc143cX"
+    if hunt.achievement_all then
+        achi_all = "|cff32cd32√"
+    end
+    local achi_diff = "|cffdc143cX"
+    if hunt.achievement_diff then
+        achi_diff = "|cff32cd32√"
+    end
+
+    achi_all = achi_all .. " Gotta Hunt Them All |r" .. " (" .. PH.achievement_remaining.All.remaining .. "/30)"
+    achi_diff = achi_diff .. " " ..  hunt.difficulty .. " III|r".. " (" .. PH.achievement_remaining[hunt.difficulty].remaining .. "/30)"
+
+    row.achievementText:SetText(
+        achi_all .. "\n" .. achi_diff 
+    )
+    row.achievementText:SetJustifyH("LEFT")
+
+
     row.nameText:SetText(hunt.name)
     -- Stripe uses difficulty color so it's an instant visual cue
     row.stripe:SetVertexColor(dc.r, dc.g, dc.b, 0.9)
@@ -257,7 +279,7 @@ local function PopulateRow(row, hunt)
     row.diffBadge:SetTextColor(dc.r, dc.g, dc.b)
 
     -- Reward icons
-    for i = 1, 4 do
+    for i = 1, 5 do
         local ic = row.rewardIcons[i]
         local r  = rewards[i]
         if r then
@@ -294,6 +316,11 @@ local function PopulateRow(row, hunt)
         GameTooltip:AddLine(hunt.difficulty, dc.r, dc.g, dc.b)
         GameTooltip:AddLine(hunt.zone or "Unknown", zc.r*1.3, zc.g*1.3, zc.b*1.3)
         GameTooltip:AddLine(inprog and "|cffffd700In Progress|r" or "|cff55ccffAvailable|r")
+
+        GameTooltip:AddLine("\nAchievement Tracking")
+        GameTooltip:AddLine(achi_all, 1, 1, 1)
+        GameTooltip:AddLine(achi_diff, 1, 1, 1)
+
         if #rewards > 0 then
             GameTooltip:AddLine(" ")
             GameTooltip:AddLine("Rewards:", 1, 0.82, 0)

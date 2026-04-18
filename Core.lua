@@ -29,8 +29,8 @@ local function HookMissionFrame()
                 PH.RefreshFromPins()
 
                 local cacheWarm = true
-                for _, h in ipairs(PH.liveHunts) do
-                    if PH.rewardCache[h.questID] == nil then
+                for _, h in ipairs(PH.rewardCache) do
+                    if PH.liveHunts[h.questID] == nil then
                         cacheWarm = false
                         break
                     end
