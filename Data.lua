@@ -121,10 +121,19 @@ local function GetRewardIcon(name)
     return PH.FALLBACK_ICON
 end
 
-local REWARD_SORT = { ["Dawncrest"]=1, ["Chest"]=2, ["Sack"]=3, ["Journey"]=4 }
+-- Ordered list so "Hero Dawncrest" (order 1) is checked before the generic
+-- "Dawncrest" pattern (order 2), preventing Hero from matching the wrong bucket.
+local REWARD_SORT = {
+    { match = "Hero Dawncrest",  order = 1 },
+    { match = "Dawncrest",       order = 2 },
+    { match = "Chest",           order = 3 },
+    { match = "Sack",            order = 3 },
+    { match = "Coffer Key Shard",order = 4 },
+    { match = "Journey",         order = 5 },
+}
 local function RewardSortKey(name)
-    for pattern, order in pairs(REWARD_SORT) do
-        if name:find(pattern, 1, true) then return order end
+    for _, entry in ipairs(REWARD_SORT) do
+        if name:find(entry.match, 1, true) then return entry.order end
     end
     return 99
 end
