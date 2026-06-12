@@ -764,6 +764,7 @@ function PH.HidePanel()
     if PH.standalone then return end
     PH.HideLoadingFrame()
     if PH._rewardWarmCancel then PH._rewardWarmCancel() end
+    if PH.HideBoard then PH.HideBoard() end
     if PH.panel and PH.panel:IsShown() then
         AnimFadeOut(PH.panel, 0.14)
     end
@@ -774,6 +775,7 @@ function PH.ForceHidePanel()
     PH.standalone = false
     PH.HideLoadingFrame()
     if PH._rewardWarmCancel then PH._rewardWarmCancel() end
+    if PH.HideBoard then PH.HideBoard() end
     if PH.panel and PH.panel:IsShown() then
         AnimFadeOut(PH.panel, 0.14)
     end

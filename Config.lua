@@ -49,3 +49,48 @@ PH.REWARD_ICONS = {
 }
 
 PH.FALLBACK_ICON = "Interface\\Icons\\inv_misc_questionmark"
+
+-- Hunt Board card models, keyed by hunt/creature name (the map-pin title).
+--
+-- PH.HUNT_CREATURES: NPC/creature id → rendered with PlayerModel:SetCreature
+-- (textured + auto-framed). Source: the creature's Wowhead page (the id is in the
+-- npc=<id> URL). This is the primary table; a name with no entry shows the flat
+-- silhouette. Names match the pin title exactly (mind the commas).
+PH.HUNT_CREATURES = {
+    ["Grothoz, the Burning Shadow"]  = 246985,
+    ["Petyoll the Razorleaf"]        = 246953,
+    ["Dengzag, the Darkened Blaze"]  = 246988,
+    ["Consul Nebulor"]               = 246510,
+    ["Imperator Enigmalia"]          = 246969,
+    ["Neydra the Starving"]          = 253918,
+    ["Ranger Swiftglade"]            = 253905,
+    ["Magister Sunbreaker"]          = 253562,
+    ["Phaseblade Talasha"]           = 247340,
+    ["The Talon of Jan'alai"]        = 253903,
+    ["Praetor Singularis"]           = 246509,
+    ["Magistrix Emberlash"]          = 246925,
+    ["Zadu, Fist of Nalorakk"]       = 253902,
+    ["The Wing of Akil'zon"]         = 246946,
+    ["Senior Tinker Ozwold"]         = 246928,
+    ["Mordril Shadowfell"]           = 246932,
+    ["Jo'zolo the Breaker"]          = 246499,
+    ["High Vindicator Vureem"]       = 253909,
+    ["Executor Kaenius"]             = 253913,
+    ["Knight-Errant Bloodshatter"]   = 253915,
+    ["Lost Theldrin"]                = 253917,
+    ["Thornspeaker Edgath"]          = 253919,
+    ["Deliah Gloomsong"]             = 253898,
+    ["Nexus-Edge Hadim"]             = 246939,
+    ["Lieutenant Blazewing"]         = 246950,
+    ["Lamyne of the Undercroft"]     = 253908,
+    ["Crusader Luxia Maxwell"]       = 246958,
+    ["Vylenna the Defector"]         = 253916,
+    ["Thorn-Witch Liset"]            = 253920,
+    ["L-N-0R the Recycler"]          = 247337,
+}
+
+-- Optional displayID override (wins over HUNT_CREATURES) via SetDisplayInfo,
+-- filled by /prey model while targeting a lured-out prey.
+PH.HUNT_MODELS = {
+    -- ["Grothoz, the Burning Shadow"] = 0,
+}

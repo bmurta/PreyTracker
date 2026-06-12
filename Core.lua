@@ -37,7 +37,7 @@ local function HookMissionFrame()
                 end
 
                 if cacheWarm then
-                    PH.ShowPanel()
+                    PH.ShowBoard()
                     return
                 end
 
@@ -50,7 +50,7 @@ local function HookMissionFrame()
                     end,
                     function()
                         if CovenantMissionFrame and CovenantMissionFrame:IsShown() then
-                            PH.ShowPanel()
+                            PH.ShowBoard()
                         else
                             PH.HideLoadingFrame()
                         end
@@ -102,7 +102,8 @@ local function HookMissionFrame()
         if elapsed < 1 then return end
         elapsed = 0
         if CovenantMissionFrame and not CovenantMissionFrame:IsShown() then
-            if PH.panel and PH.panel:IsShown() then
+            if (PH.panel and PH.panel:IsShown())
+                or (PH.huntBoard and PH.huntBoard:IsShown()) then
                 PH.HidePanel()
             end
         end
@@ -127,6 +128,18 @@ SlashCmdList["PREYTRACKER"] = function(msg)
 
     elseif cmd == "widget" then
         PH.ToggleBlizzWidget()
+
+    elseif cmd == "test" then
+        PH.SpawnTestCard()
+
+    elseif cmd == "board" then
+        PH.ToggleHuntBoard()
+
+    elseif cmd == "model" then
+        PH.CaptureModel()
+
+    elseif cmd == "dumpdialog" then
+        PH.DumpDialog()
 
     elseif cmd == "hide" then
         PH.ForceHidePanel()
@@ -182,11 +195,13 @@ frame:SetScript("OnEvent", function(_, event, arg1)
 
     elseif event == "QUEST_LOG_UPDATE" then
         if PH.panel and PH.panel:IsShown() then PH.RefreshRows() end
+        if PH.huntBoard and PH.huntBoard:IsShown() then PH.PopulateBoard() end
 
     elseif event == "CURRENCY_DISPLAY_UPDATE" then
         if PH.panel and PH.panel:IsShown() then
             PH.panel.anguishText:SetText(
                 string.format("|cffdd4444%d|r Anguish", PH.GetAnguishCurrency()))
         end
+        if PH.huntBoard and PH.huntBoard:IsShown() then PH.UpdateBoardAnguish() end
     end
 end)
