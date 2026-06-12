@@ -83,6 +83,14 @@ local function HookMissionFrame()
                     stableN   = 0
                     lastCount = n
                 end
+                -- A hunt already in progress means Blizzard offers no pins, so
+                -- don't make the player wait out MAX_WAIT — show the board (with
+                -- the current prey highlighted) as soon as we know.
+                if n == 0 and elapsed >= 0.6
+                    and PH.HasInProgressHunt and PH.HasInProgressHunt() then
+                    Proceed()
+                    return
+                end
                 if elapsed >= MAX_WAIT then Proceed() end
             end)
         end
@@ -103,7 +111,8 @@ local function HookMissionFrame()
         elapsed = 0
         if CovenantMissionFrame and not CovenantMissionFrame:IsShown() then
             if (PH.panel and PH.panel:IsShown())
-                or (PH.huntBoard and PH.huntBoard:IsShown()) then
+                or (PH.huntBoard and PH.huntBoard:IsShown())
+                or (PH.boardChip and PH.boardChip:IsShown()) then
                 PH.HidePanel()
             end
         end
@@ -151,27 +160,20 @@ SlashCmdList["PREYTRACKER"] = function(msg)
         PH.standalone = true
         PH.ShowPanel()
 
-    else
+    elseif cmd == "panel" then
+        -- Fallback: the old UI.lua standalone list panel.
         PH.BuildPanel()
-        if PH.panel:IsShown() and cmd ~= "show" then
+        if PH.panel:IsShown() then
             PH.ForceHidePanel()
         else
             PH.standalone = true
-            PH.RefreshFromPins()
-            local cacheWarm = true
-            for _, h in ipairs(PH.liveHunts) do
-                if PH.rewardCache[h.questID] == nil then cacheWarm = false; break end
-            end
-            if cacheWarm then
-                PH.ShowPanel()
-            else
-                PH.ShowLoadingFrame(0, #PH.liveHunts)
-                PH.WarmRewardCacheAsync(
-                    function(done, total) PH.ShowLoadingFrame(done, total) end,
-                    function() PH.ShowPanel() end
-                )
-            end
+            PH.ShowPanel()
         end
+
+    else
+        -- Default (and /prey show): the Hunt Board, centered on screen, rendered
+        -- from the last scan's cached hunts + rewards.
+        PH.OpenBoardStandalone()
     end
 end
 
@@ -183,10 +185,17 @@ frame:RegisterEvent("ADDON_LOADED")
 frame:RegisterEvent("PLAYER_ENTERING_WORLD")
 frame:RegisterEvent("QUEST_LOG_UPDATE")
 frame:RegisterEvent("CURRENCY_DISPLAY_UPDATE")
+frame:RegisterEvent("CRITERIA_UPDATE")
+frame:RegisterEvent("ACHIEVEMENT_EARNED")
+frame:RegisterEvent("UPDATE_UI_WIDGET")
 
 frame:SetScript("OnEvent", function(_, event, arg1)
     if event == "ADDON_LOADED" and arg1 == "PreyTracker" then
         HookMissionFrame()
+        PH.LoadCache()   -- seed liveHunts/rewardCache from the persisted scan
+        -- Minimize is a per-session choice (persisted only so it survives a map
+        -- close/reopen). Start each session with the board un-minimized.
+        if PreyTrackerDB then PreyTrackerDB.boardMinimized = false end
         PH.CreateMinimapButton()
         print("|cffcc44ccPreyTracker|r loaded. /prey to toggle  ·  /prey bar  ·  /prey widget  ·  /prey bar reset")
 
@@ -203,5 +212,15 @@ frame:SetScript("OnEvent", function(_, event, arg1)
                 string.format("|cffdd4444%d|r Anguish", PH.GetAnguishCurrency()))
         end
         if PH.huntBoard and PH.huntBoard:IsShown() then PH.UpdateBoardAnguish() end
+
+    elseif event == "CRITERIA_UPDATE" or event == "ACHIEVEMENT_EARNED" then
+        if PH.RefreshBoardAchievements then PH.RefreshBoardAchievements() end
+
+    elseif event == "UPDATE_UI_WIDGET" then
+        -- Keep the in-progress card's mini meter live (widget 7663).
+        local wid = type(arg1) == "table" and arg1.widgetID or arg1
+        if (wid == 7663 or wid == nil) and PH.UpdateBoardProgress then
+            PH.UpdateBoardProgress()
+        end
     end
 end)

@@ -1,10 +1,11 @@
 # PreyTracker — Architecture & Development Notes
 
-A World of Warcraft addon (Interface `120001`, The War Within / Midnight prey
-system) by **Valash**. It provides an alternative side-panel UI for the Prey
-Hunt system, docking alongside `CovenantMissionFrame` (the Hunt Table map), plus
-a custom progress bar that surfaces the otherwise-hidden prey completion
-percentage.
+A World of Warcraft addon (Interface `120007`, The War Within / Midnight prey
+system) by **Valash**. It provides an alternative UI for the Prey Hunt system:
+the **Hunt Board** (a 4×3 zone × difficulty grid) renders over
+`CovenantMissionFrame` (the Hunt Table map) as the map-open main screen, with the
+original side panel kept for standalone (`/prey` / minimap) use, plus a custom
+progress bar that surfaces the otherwise-hidden prey completion percentage.
 
 This document is the reference for migrating the project into a Claude Code
 workspace. It describes how data is acquired, how locations are determined, every
@@ -40,25 +41,66 @@ Declared in `PreyTracker.toc` (`SavedVariables: PreyTrackerDB`,
 
 ```
 Libs\LibStub.lua
+Libs\CallbackHandler-1.0.lua
 Libs\LibDataBroker-1.1.lua
 Libs\LibDBIcon-1.0.lua
 
 Core.lua
 Config.lua
+Widgets.lua
 Data.lua
 UI.lua
+HuntBoard.lua
+Achievements.lua
 Progress.lua
 ```
 
 | File | Responsibility |
 |------|----------------|
 | `Core.lua` | Event handling, slash commands, `ShowUIPanel`/`HideUIPanel` hooks, pin-stability polling, minimap button init |
-| `Config.lua` | All constants: panel sizes, difficulty/zone colors, reward-icon map, currency ID, sort-order tables |
-| `Data.lua` | Pin scanning, cache-validity check, async reward-cache warmer, sort/filter helpers, state helpers |
-| `UI.lua` | Panel construction, row pool, filter bar, loading overlay, map overlay, minimap button (LibDBIcon + manual fallback) |
+| `Config.lua` | All constants: panel sizes, difficulty/zone colors, reward-icon map, currency ID, sort-order tables, `HUNT_CREATURES`/`HUNT_MODELS` card-model tables |
+| `Widgets.lua` | Hunt Board chrome: media texture paths, the revamp palette (`PH.PAL`), and the `CreateCard`/`CreatePill`/`CreateGlow`/`CreateIcon` nine-slice factories; `/prey test` sample card |
+| `Data.lua` | Pin scanning, cache-validity check, async reward-cache warmer, sort/filter helpers, state helpers, `lastScanTime` stamp |
+| `UI.lua` | Side panel (standalone mode), row pool, filter bar, loading overlay, map overlay, minimap button (LibDBIcon + manual fallback) |
+| `HuntBoard.lua` | The Hunt Board: 4×3 card grid over the map, header/footer, card models, accept flow, footer achievement bar + Rescan + scan age |
+| `Achievements.lua` | Resolves "Prey: Nightmare Mode III" by name (cached/fallback), reads its criteria, joins them to hunt names for the per-card chips, footer bar, and trophy tooltip |
 | `Progress.lua` | Custom progress bar reading widget 7663; suppression of Blizzard's native widget |
-| `libs/` | LibStub, LibDataBroker-1.1, LibDBIcon-1.0 |
+| `Libs/` | LibStub, CallbackHandler-1.0, LibDataBroker-1.1, LibDBIcon-1.0 |
 | `LICENSE` | Proprietary, all rights reserved to Valash |
+
+> **Hunt Board (`HuntBoard.lua`):** the map-open main screen, replacing the docked
+> side panel. It reuses the existing pipeline only — `PH.liveHunts`,
+> `PH.rewardCache`, `PH.IsInProgress`, widget 7663, currency 3392 — laid onto a
+> 4 zones × 3 difficulties grid (the one-hunt-per-(difficulty, zone) invariant *is*
+> the grid). All chrome is built from the `Widgets.lua` nine-slice factories. The
+> `Rescan` footer button re-runs `RefreshFromPins` + `WarmRewardCacheAsync`; the
+> "Xm ago" scan age reads `PH.lastScanTime` (stamped in `RefreshFromPins`).
+>
+> **The board is now the experience everywhere (Phase 5).** `/prey` and the minimap
+> button open it centered on screen (`PH.OpenBoardStandalone`), rendered from a
+> durable per-character snapshot of the last scan (`PreyTrackerDB.cachedHunts` /
+> `cachedRewards`, written by `PH.SaveCache`, seeded at login by `PH.LoadCache`).
+> Out of the map there are no offer pins to accept against, so Accept is replaced by
+> a faint "Open the Prey map to accept" hint (`PH.standalone`). `PH.GetBoardHunts`
+> merges live pins with the snapshot so an **in-progress hunt whose offer pin
+> Blizzard hides** still renders — with the strongest emphasis (gold border +
+> `card_glow` ring) and a live mini meter (widget 7663, `UPDATE_UI_WIDGET`). To make
+> this safe, `RefreshFromPins` no longer wipes the cache when the pool is absent or
+> empty. The map-mode header adds a **minimize** (–) button that hides the overlay
+> and shows a restore chip on the map (`PreyTrackerDB.boardMinimized`, reset each
+> session); the **close** button over the map routes through
+> `HideUIPanel(CovenantMissionFrame)` so the existing Core hook tears the board down
+> once. `/prey panel` still opens the old `UI.lua` list panel.
+>
+> **Achievements (`Achievements.lua`):** there is no "achievement by name" API and
+> the PTR id drifts, so the id is resolved *by name* — cached id → hardcoded
+> fallback → full category scan, each candidate verified by name and walked through
+> its I→II→III series chain (`GetNextAchievement`). The resolved id is cached in
+> `PreyTrackerAccountDB.achievementID`. Criteria (`GetAchievementNumCriteria` /
+> `GetAchievementCriteriaInfo`) are joined to hunt names (exact-normalized, then
+> substring) to drive the Nightmare-row trophy/check chips, the footer
+> completed/total bar, and the trophy's remaining-criteria tooltip. Refreshed on
+> `CRITERIA_UPDATE` / `ACHIEVEMENT_EARNED` (Core.lua).
 
 > **Load-order note:** `Core.lua` loads before `UI.lua`. A historical bug came
 > from a wrapper that captured `PH.CreateMinimapButton` at Core-load time, when
@@ -449,6 +491,9 @@ Everything below is a silent-break risk on a Blizzard UI change:
 | `PREY_WIDGET_ID = 7663` | `Progress.lua` | widget ID can change between builds |
 | `ANGUISH_CURRENCY_ID = 3392` | `Config.lua` | currency ID can change between builds |
 | `C_UIWidgetManager.GetPreyHuntProgressWidgetVisualizationInfo` | `Progress.lua` | API signature/field changes |
+| Achievement criteria → hunt **name join** (and the by-name id resolution) | `Achievements.lua` | criterion text is matched to hunt names (exact-normalized, then substring), English-only like difficulty parsing; a renamed prey, reworded criterion, or a single progress-bar criterion silently drops the chip/footer match. The id is found by scanning categories for the name "Prey: Nightmare Mode III" — a renamed achievement makes it unresolvable until the fallback id is filled in |
+| `SetTextureSliceMargins` / `SetTextureSliceMode` nine-slice API | `Widgets.lua` (every card/pill/glow), `HuntBoard.lua`, `UI.lua` reward borders | requires a modern client (present in Midnight); a signature change or pre-Midnight client breaks all rounded panel/card/pill chrome |
+| `CovenantMissionFrame` top-right anchor for the minimized restore chip | `HuntBoard.lua` (`PH.ShowBoardChip`) | the chip is parented to `UIParent` but anchored to the map frame's TOPRIGHT; a renamed/removed frame leaves the chip unanchored (the board still closes via the `HideUIPanel` hook) |
 
 ### Open verification items for the migration
 

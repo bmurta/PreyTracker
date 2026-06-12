@@ -797,33 +797,14 @@ function PH.CreateMinimapButton()
         local broker = LDB:NewDataObject("PreyTracker", {
             type  = "launcher",
             label = "PreyTracker",
-            icon  = "Interface\\Icons\\Ui_prey",
+            icon  = PH.MEDIA.icon_prey,
             OnClick = function(_, button)
                 if button ~= "LeftButton" then return end
-                PH.BuildPanel()
-                if PH.panel:IsShown() then
-                    PH.ForceHidePanel()
-                else
-                    PH.standalone = true
-                    PH.RefreshFromPins()
-                    local cacheWarm = true
-                    for _, h in ipairs(PH.liveHunts) do
-                        if PH.rewardCache[h.questID] == nil then cacheWarm = false; break end
-                    end
-                    if cacheWarm then
-                        PH.ShowPanel()
-                    else
-                        PH.ShowLoadingFrame(0, #PH.liveHunts)
-                        PH.WarmRewardCacheAsync(
-                            function(done, total) PH.ShowLoadingFrame(done, total) end,
-                            function() PH.ShowPanel() end
-                        )
-                    end
-                end
+                PH.OpenBoardStandalone()
             end,
             OnTooltipShow = function(tt)
                 tt:AddLine("PreyTracker", 0.85, 0.5, 1.0)
-                tt:AddLine("Toggle Prey Hunt panel", 0.7, 0.7, 0.75)
+                tt:AddLine("Toggle the Hunt Board", 0.7, 0.7, 0.75)
             end,
         })
         LDBIcon:Register("PreyTracker", broker, PreyTrackerDB.minimap)
@@ -845,8 +826,7 @@ function PH.CreateMinimapButton()
     local tex = btn:CreateTexture(nil, "BACKGROUND")
     tex:SetPoint("TOPLEFT",     btn, "TOPLEFT",      2, -2)
     tex:SetPoint("BOTTOMRIGHT", btn, "BOTTOMRIGHT", -2,  2)
-    tex:SetTexture("Interface\\Icons\\Ui_prey")
-    tex:SetTexCoord(0.07, 0.93, 0.07, 0.93)
+    tex:SetTexture(PH.MEDIA.icon_prey)   -- addon logo (pre-colored crystal)
 
     local border = btn:CreateTexture(nil, "OVERLAY")
     border:SetSize(53, 53)
@@ -885,31 +865,12 @@ function PH.CreateMinimapButton()
 
     btn:SetScript("OnClick", function(self, button)
         if button ~= "LeftButton" then return end
-        PH.BuildPanel()
-        if PH.panel:IsShown() then
-            PH.ForceHidePanel()
-        else
-            PH.standalone = true
-            PH.RefreshFromPins()
-            local cacheWarm = true
-            for _, h in ipairs(PH.liveHunts) do
-                if PH.rewardCache[h.questID] == nil then cacheWarm = false; break end
-            end
-            if cacheWarm then
-                PH.ShowPanel()
-            else
-                PH.ShowLoadingFrame(0, #PH.liveHunts)
-                PH.WarmRewardCacheAsync(
-                    function(done, total) PH.ShowLoadingFrame(done, total) end,
-                    function() PH.ShowPanel() end
-                )
-            end
-        end
+        PH.OpenBoardStandalone()
     end)
     btn:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_LEFT")
         GameTooltip:AddLine("PreyTracker", 0.85, 0.5, 1.0)
-        GameTooltip:AddLine("Toggle Prey Hunt panel", 0.7, 0.7, 0.75)
+        GameTooltip:AddLine("Toggle the Hunt Board", 0.7, 0.7, 0.75)
         GameTooltip:AddLine(" ")
         GameTooltip:AddLine("|cff888888Drag to reposition|r", 0.5, 0.5, 0.5)
         GameTooltip:Show()

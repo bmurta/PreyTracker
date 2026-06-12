@@ -143,6 +143,33 @@ make("icon_skull.tga", 64, 64, G +
      'M6 5.8a1.2 1.2 0 110 2.4 1.2 1.2 0 010-2.4z M10 5.8a1.2 1.2 0 110 2.4 1.2 1.2 0 010-2.4z '
      'M7.3 9.2h1.4v1.6h-1.4z"/></g>')
 
+# ---------------------------------------------------------------- prey crystal logo
+CRYSTAL = (
+    '<defs><radialGradient id="aura" cx="0.5" cy="0.52" r="0.5">'
+    '<stop offset="0" stop-color="#ff2235" stop-opacity="0.55"/>'
+    '<stop offset="0.55" stop-color="#d41830" stop-opacity="0.28"/>'
+    '<stop offset="1" stop-color="#d41830" stop-opacity="0"/></radialGradient>'
+    '<radialGradient id="wisp" cx="0.5" cy="0.5" r="0.5">'
+    '<stop offset="0" stop-color="#ff3346" stop-opacity="0.30"/>'
+    '<stop offset="1" stop-color="#ff3346" stop-opacity="0"/></radialGradient>'
+    '<linearGradient id="topfacet" x1="0" y1="0" x2="0.4" y2="1">'
+    '<stop offset="0" stop-color="#ff8b94"/><stop offset="1" stop-color="#f24557"/></linearGradient></defs>'
+    '<circle cx="32" cy="33" r="31" fill="url(#aura)"/>'
+    '<ellipse cx="14" cy="40" rx="10" ry="16" fill="url(#wisp)"/>'
+    '<ellipse cx="50" cy="26" rx="9" ry="15" fill="url(#wisp)"/>'
+    '<path d="M33 4 L46 21 L47 40 C47 51 40 59 32 59 C23 59 17 50 17 40 L19 19 Z" fill="#6b1226"/>'
+    '<path d="M33 4 L46 21 L34 26 Z" fill="url(#topfacet)"/>'
+    '<path d="M33 4 L34 26 L19 19 Z" fill="#e23a4e"/>'
+    '<path d="M19 19 L34 26 L17 40 Z" fill="#a82440"/>'
+    '<path d="M46 21 L47 40 L34 26 Z" fill="#c92c44"/>'
+    '<path d="M17 40 L34 26 L33 44 Z" fill="#871a32"/>'
+    '<path d="M34 26 L47 40 L33 44 Z" fill="#9e2038"/>'
+    '<path d="M17 40 C17 50 23 59 32 59 L33 44 Z" fill="#4a0a1c"/>'
+    '<path d="M33 44 L32 59 C40 59 47 51 47 40 Z" fill="#5e0f24"/>'
+    '<path d="M33 4 L40 13 L35 15 Z" fill="#ffd9dd" fill-opacity="0.85"/>'
+    '<path d="M21 21 L31 25 L20 33 Z" fill="#ff6b78" fill-opacity="0.35"/>')
+make("icon_prey.tga", 64, 64, CRYSTAL)
+
 # ---------------------------------------------------------------- validate headers
 print(f"{'file':<22}{'dims':<12}{'bpp':<5}pow2  bytes")
 ok = True

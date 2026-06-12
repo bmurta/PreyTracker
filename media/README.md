@@ -34,7 +34,8 @@ Swap for a `ModelScene`/`PlayerModel` frame + `SetDisplayInfo(displayID)` once a
 
 | File | Size | Tint | Use |
 |---|---|---|---|
-| `icon_paw.tga` | 64×64 | white → any | Logo, minimap button. |
+| `icon_prey.tga` | 64×64 | pre-colored | **The addon logo**: faceted red prey crystal with aura. Header, minimap button, restore chip. Do not vertex-tint. |
+| `icon_paw.tga` | 64×64 | white → any | Legacy logo, kept but unused. |
 | `icon_trophy.tga` | 64×64 | pre-colored | Achievement chip: hunt still needed for Prey: Nightmare Mode III. |
 | `icon_check.tga` | 64×64 | white → green | Achievement criteria complete. |
 | `icon_gem.tga` | 64×64 | pre-colored | Anguish currency chip. |

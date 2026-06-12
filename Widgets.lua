@@ -24,7 +24,7 @@ for _, name in ipairs({
     -- creature silhouettes
     "sil_stag", "sil_cat", "sil_bat", "sil_void",
     -- icons
-    "icon_paw", "icon_trophy", "icon_check", "icon_gem", "icon_reload",
+    "icon_prey", "icon_paw", "icon_trophy", "icon_check", "icon_gem", "icon_reload",
     "icon_close", "icon_dot", "icon_skull", "icon_target", "pin",
 }) do
     PH.MEDIA[name] = BASE .. name

@@ -19,6 +19,12 @@ local FONT  = "Fonts\\FRIZQT__.TTF"
 
 local PREY_WIDGET_ID = 7663   -- prey hunt progress widget (Progress.lua owns the bar)
 
+-- Card model framing. Portrait zoom aims the camera vertically (0 = full body,
+-- 1 = head/shoulders) — higher moves up toward the face. Cam scale is the camera
+-- distance multiplier — >1 pulls back (zooms out), <1 moves in. Tune to taste.
+local MODEL_PORTRAIT_ZOOM = 1.0
+local MODEL_CAM_SCALE     = 1.45
+
 local function ColorObj(c, a) return CreateColor(c[1], c[2], c[3], a or 1) end
 
 -- Small font-string helper so every label sets its size the same way.
@@ -26,6 +32,17 @@ local function FS(parent, size, flags, layer)
     local fs = parent:CreateFontString(nil, layer or "OVERLAY")
     fs:SetFont(FONT, size, flags)
     return fs
+end
+
+-- Footer scan-age text. PH.lastScanTime is stamped by RefreshFromPins (Data.lua)
+-- each time the pins are scraped; this renders the elapsed time coarsely.
+local function FormatAge(t)
+    if not t then return "not scanned" end
+    local s = GetTime() - t
+    if s < 5    then return "just now" end
+    if s < 60   then return string.format("%ds ago", math.floor(s)) end
+    if s < 3600 then return string.format("%dm ago", math.floor(s / 60)) end
+    return string.format("%dh ago", math.floor(s / 3600))
 end
 
 -- ---------------------------------------------------------------------------
@@ -64,6 +81,43 @@ local ZONE_SIL = {
 }
 
 local CARD_BORDER_HOVER = { 0.28, 0.30, 0.38 }
+
+-- ---------------------------------------------------------------------------
+-- Load a creature into a card's PlayerModel, reliably. An uncached creature model
+-- loads asynchronously, and SetCreature's auto-camera is computed once, against
+-- the (empty) bounds available at call time — so a model set before its load
+-- finishes frames on nothing and renders blank. The engine doesn't re-frame when
+-- the load later completes, which is why blank cards only appeared after a close
+-- + reopen (a second apply on the now-loaded model). So we re-apply once the load
+-- completes: OnModelLoaded is the trigger, with a timer fallback if it doesn't
+-- fire. Re-applying an already-framed (cached) model is a no-op, so no flicker.
+-- _loadedKey skips redundant reloads so re-populates (QUEST_LOG_UPDATE) don't churn.
+-- ---------------------------------------------------------------------------
+local function LoadCardModel(model, creatureID, displayID)
+    local key = displayID and ("d" .. displayID) or ("c" .. creatureID)
+    if model._loadedKey == key then return end
+    model._loadedKey = key
+
+    local function reframe()
+        if model._loadedKey ~= key then return end  -- superseded by a newer load
+        if displayID then model:SetDisplayInfo(displayID)
+        else               model:SetCreature(creatureID) end
+        model:SetPortraitZoom(MODEL_PORTRAIT_ZOOM)  -- aim up toward the face
+        model:SetCamDistanceScale(MODEL_CAM_SCALE)  -- pull the camera back a bit
+        model:SetFacing(0.5)
+    end
+
+    model._reframe = reframe
+    reframe()                        -- kick off the (async) load
+    -- Fallback if OnModelLoaded doesn't fire: re-apply a few times over the next
+    -- few seconds. Each skips once OnModelLoaded has cleared _reframe; re-applying
+    -- an already-framed model is harmless.
+    for _, delay in ipairs({ 0.5, 1.5, 3.0 }) do
+        C_Timer.After(delay, function()
+            if model._reframe == reframe then reframe() end
+        end)
+    end
+end
 
 -- ---------------------------------------------------------------------------
 -- Card factory — one cell of the grid. Zone/difficulty are fixed per cell, so
@@ -248,15 +302,31 @@ local function BuildCard(parent, zone, diff)
         if not questID then return end
         local dialog = AdventureMapQuestChoiceDialog
         if not (dialog and dialog.ShowWithQuest and dialog.AcceptQuest) then return end
+        -- Needs a live offer pin to accept against; a card rendered from the
+        -- cache (e.g. while another hunt is in progress) has none — bail quietly.
+        local pin = PH.FindPin(questID)
+        if not pin then return end
         dialog:SetAlpha(1)
         dialog:ClearAllPoints()
         dialog:SetPoint("CENTER", UIParent, "CENTER")
-        dialog:ShowWithQuest(CovenantMissionFrame, PH.FindPin(questID), questID)
+        dialog:ShowWithQuest(CovenantMissionFrame, pin, questID)
         dialog:AcceptQuest()
         HideUIPanel(CovenantMissionFrame)
     end)
     accept:Hide()
     card.accept = accept
+
+    -- Out-of-map hint that stands in for Accept when there are no live pins to
+    -- accept against (PH.standalone). Faint, right-aligned where Accept sits.
+    local hint = FS(card, 9, nil, "OVERLAY")
+    hint:SetPoint("BOTTOMRIGHT", -8, 9)
+    hint:SetWidth(150)
+    hint:SetJustifyH("RIGHT")
+    hint:SetWordWrap(true)
+    hint:SetText("Open the Prey map to accept")
+    hint:SetTextColor(PAL.textFaint[1], PAL.textFaint[2], PAL.textFaint[3])
+    hint:Hide()
+    card.acceptHint = hint
 
     -- Mini 3-segment progress meter (in-progress card, from widget 7663).
     local meter = CreateFrame("Frame", nil, card)
@@ -285,15 +355,25 @@ local function BuildCard(parent, zone, diff)
             self.hovered = true
             self:Render()
         end
+        PH.ShowCardTooltip(self)
     end)
     card:SetScript("OnLeave", function(self)
+        -- The Accept button is a mouse-enabled child that only appears on hover;
+        -- moving the cursor onto it fires this OnLeave even though we're still
+        -- inside the card. Ignore those so showing/hiding Accept can't ping-pong
+        -- the hover state (the flashing bug). Only truly leaving the card counts.
+        if self:IsMouseOver() then return end
         if self.hovered then
             self.hovered = false
             self:Render()
         end
+        GameTooltip:Hide()
     end)
     card:SetScript("OnMouseUp", function(self, button)
-        if button == "LeftButton" and self.data and not self.inProgress then
+        -- Selecting only makes sense when Accept is live (map mode). Out of the
+        -- map there's nothing to accept against, so a click just leaves the hint.
+        if button == "LeftButton" and self.data and not self.inProgress
+            and not PH.standalone then
             PH.SelectCard(self)
         end
     end)
@@ -310,6 +390,7 @@ local function BuildCard(parent, zone, diff)
         self.ring:Hide()
         self.wash:Hide()
         self.accept:Hide()
+        self.acceptHint:Hide()
         self.meter:Hide()
         self.emptyText:Hide()
         PH.Color(self.border, PAL.cardBorder)
@@ -379,8 +460,13 @@ local function BuildCard(parent, zone, diff)
         end
 
         if self.inProgress then
+            -- Current prey: the strongest emphasis on the board — full gold
+            -- border plus the card_glow ring (HUNTBOARD_SPEC.md Phase 5). Every
+            -- other cell stays a plain "available this week" card.
             SetPill(PAL.gold, "In Progress")
-            PH.Color(self.border, PAL.gold, 0.5)
+            PH.Color(self.border, PAL.gold)
+            PH.Color(self.ring, PAL.gold, 0.9)
+            self.ring:Show()
             self.wash:Show()
             self.meter:Show()
             local prog = d.progress or 0
@@ -395,16 +481,21 @@ local function BuildCard(parent, zone, diff)
             SetPill(PAL.cyan, "Available")
             if self.selected then
                 PH.Color(self.border, PAL.violet)
+                PH.Color(self.ring, PAL.violet, 0.9)
                 self.ring:Show()
+            elseif self.hovered then
+                PH.Color(self.border, CARD_BORDER_HOVER)
+            end
+            if PH.standalone then
+                -- Out of the map (no live pins): faint hint instead of Accept.
+                self.acceptHint:Show()
+            elseif self.selected then
                 self.accept:Show()
                 ag:SetAlpha(1)
             elseif self.hovered then
-                PH.Color(self.border, CARD_BORDER_HOVER)
                 self.accept:Show()
                 ag:SetAlpha(0.7)
             end
-            -- Standalone (read-only) mirrors UI.lua: never show Accept.
-            if PH.standalone then self.accept:Hide() end
         end
     end
 
@@ -429,12 +520,7 @@ local function BuildCard(parent, zone, diff)
         self.hasModel = (creatureID or displayID) and true or false
         if self.hasModel then
             self.model:Show()
-            if displayID then
-                self.model:SetDisplayInfo(displayID)
-            else
-                self.model:SetCreature(creatureID)
-            end
-            self.model:SetFacing(0.5)
+            LoadCardModel(self.model, creatureID, displayID)
         else
             self.model:Hide()
         end
@@ -466,13 +552,14 @@ local function BuildHeader(board, content)
         PH.Color(hair, PAL.violet, 0.6)
     end
 
-    -- Paw logo on a violet rounded square.
-    local logo = PH.CreateCard(header, PAL.violet, PAL.violet)
-    logo:SetSize(38, 38)
-    logo:SetPoint("LEFT", 2, 0)
-    local paw = PH.CreateIcon(logo, "icon_paw", 22, "OVERLAY")
-    paw:SetPoint("CENTER")
-    PH.Color(paw, { 1, 1, 1 })
+    -- Logo: the red prey crystal (icon_prey). It carries its own aura/glow, so
+    -- there's no violet plate behind it and it is NOT vertex-tinted (pre-colored).
+    local logo = CreateFrame("Frame", nil, header)
+    logo:SetSize(40, 40)
+    logo:SetPoint("LEFT", 0, 0)
+    local crystal = PH.CreateIcon(logo, "icon_prey", nil, "OVERLAY")
+    crystal:SetSize(40, 40)
+    crystal:SetPoint("CENTER")
 
     -- Title: "Prey" (violet) + "Tracker" (white), with "HUNT BOARD" beside it.
     local prey = FS(header, 20, nil, "OVERLAY")
@@ -495,7 +582,9 @@ local function BuildHeader(board, content)
     sub:SetText("ONE HUNT PER DIFFICULTY, PER ZONE")
     sub:SetTextColor(PAL.textFaint[1], PAL.textFaint[2], PAL.textFaint[3])
 
-    -- Close button (right edge).
+    -- Close button (right edge). Over the map it closes the map too, routing
+    -- through HideUIPanel so the existing Core.lua hook tears the board down
+    -- once (no double-fire); out of the map it just hides the board.
     local close = CreateFrame("Button", nil, header)
     close:SetSize(24, 24)
     close:SetPoint("RIGHT", 0, 0)
@@ -504,12 +593,35 @@ local function BuildHeader(board, content)
     PH.Color(x, PAL.textDim)
     close:SetScript("OnEnter", function() PH.Color(x, PAL.text) end)
     close:SetScript("OnLeave", function() PH.Color(x, PAL.textDim) end)
-    close:SetScript("OnClick", function() PH.HideBoard() end)
+    close:SetScript("OnClick", function()
+        if CovenantMissionFrame and CovenantMissionFrame:IsShown() then
+            HideUIPanel(CovenantMissionFrame)   -- Core hook → HidePanel → HideBoard
+        else
+            PH.HideBoard()
+        end
+    end)
+    board.closeBtn = close
 
-    -- Anguish chip (red pill: gem + amount), left of the close button.
+    -- Minimize button (–), left of close. Map mode only (UpdateBoardChrome shows
+    -- it); reveals Blizzard's map underneath and drops a restore chip on it.
+    local minBtn = CreateFrame("Button", nil, header)
+    minBtn:SetSize(24, 24)
+    minBtn:SetPoint("RIGHT", close, "LEFT", -2, 0)
+    local dash = minBtn:CreateTexture(nil, "OVERLAY")
+    dash:SetTexture(WHITE)
+    dash:SetSize(11, 2)
+    dash:SetPoint("CENTER")
+    PH.Color(dash, PAL.textDim)
+    minBtn:SetScript("OnEnter", function() PH.Color(dash, PAL.text) end)
+    minBtn:SetScript("OnLeave", function() PH.Color(dash, PAL.textDim) end)
+    minBtn:SetScript("OnClick", function() PH.MinimizeBoard() end)
+    board.minBtn = minBtn
+
+    -- Anguish chip (red pill: gem + amount). Anchored left of whichever control
+    -- is rightmost for the current mode — UpdateBoardChrome re-points it.
     local chip = PH.CreatePill(header, { 0.18, 0.05, 0.05 }, PAL.anguishRed)
     chip:SetSize(72, 24)
-    chip:SetPoint("RIGHT", close, "LEFT", -8, 0)
+    chip:SetPoint("RIGHT", minBtn, "LEFT", -8, 0)
     local gem = PH.CreateIcon(chip, "icon_gem", 14, "OVERLAY")
     gem:SetPoint("LEFT", 8, 0)
     chip.text:ClearAllPoints()
@@ -557,14 +669,45 @@ local function BuildFooter(board, content)
     counts:SetPoint("LEFT", 0, 0)
     board.footerCounts = counts
 
-    -- Center: trophy + "PREY: NIGHTMARE MODE III" + violet bar + "9/12".
-    local trophy = PH.CreateIcon(footer, "icon_trophy", 16, "OVERLAY")
-    trophy:SetPoint("CENTER", footer, "CENTER", -150, 0)
+    -- Center: trophy + achievement name + violet bar + "x/y". The trophy is a
+    -- mouse-enabled frame so it can show a tooltip of the remaining criteria;
+    -- the name/count/bar are driven from Achievements.lua by UpdateBoardAchievement.
+    local trophyBtn = CreateFrame("Frame", nil, footer)
+    trophyBtn:SetSize(18, 18)
+    trophyBtn:SetPoint("CENTER", footer, "CENTER", -150, 0)
+    trophyBtn:EnableMouse(true)
+    local trophy = PH.CreateIcon(trophyBtn, "icon_trophy", 16, "OVERLAY")
+    trophy:SetPoint("CENTER")
+    trophyBtn:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        local name, completed, total = PH.GetAchievementSummary()
+        GameTooltip:SetText(name, PAL.violet[1], PAL.violet[2], PAL.violet[3])
+        if total == 0 then
+            GameTooltip:AddLine("Achievement not detected yet.",
+                PAL.textFaint[1], PAL.textFaint[2], PAL.textFaint[3])
+        else
+            GameTooltip:AddLine(string.format("%d / %d complete", completed, total), 0.9, 0.9, 0.9)
+            local remaining = PH.GetRemainingCriteria()
+            if #remaining == 0 then
+                GameTooltip:AddLine("All criteria complete!",
+                    PAL.diffNormal[1], PAL.diffNormal[2], PAL.diffNormal[3])
+            else
+                GameTooltip:AddLine(" ")
+                GameTooltip:AddLine("Remaining:", PAL.textDim[1], PAL.textDim[2], PAL.textDim[3])
+                for _, n in ipairs(remaining) do
+                    GameTooltip:AddLine("|cffffd24d•|r " .. n, PAL.text[1], PAL.text[2], PAL.text[3])
+                end
+            end
+        end
+        GameTooltip:Show()
+    end)
+    trophyBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
     local achName = FS(footer, 11, nil, "OVERLAY")
-    achName:SetPoint("LEFT", trophy, "RIGHT", 6, 0)
+    achName:SetPoint("LEFT", trophyBtn, "RIGHT", 6, 0)
     achName:SetText("PREY: NIGHTMARE MODE III")
     achName:SetTextColor(PAL.textDim[1], PAL.textDim[2], PAL.textDim[3])
+    board.achName = achName
 
     local barBg = PH.CreatePill(footer, { 0.06, 0.06, 0.09 }, PAL.cardBorder)
     barBg:SetSize(120, 10)
@@ -572,19 +715,23 @@ local function BuildFooter(board, content)
     local barFill = barBg:CreateTexture(nil, "ARTWORK")
     barFill:SetTexture(WHITE)
     barFill:SetPoint("LEFT", 2, 0)
-    barFill:SetSize(116 * (9 / 12), 6)
+    barFill:SetSize(1, 6)
     PH.Color(barFill, PAL.violet)
+    board.achBarFill = barFill
+    board.achBarW    = 116   -- pill width (120) minus the 2px inset on each side
 
     local barText = FS(footer, 11, nil, "OVERLAY")
     barText:SetPoint("LEFT", barBg, "RIGHT", 8, 0)
-    barText:SetText("9/12")
+    barText:SetText("0/0")
     barText:SetTextColor(PAL.text[1], PAL.text[2], PAL.text[3])
+    board.achBarText = barText
 
     -- Right: scan age + Rescan button.
     local age = FS(footer, 11, nil, "OVERLAY")
     age:SetPoint("RIGHT", 0, 0)
-    age:SetText("2m ago")
+    age:SetText(FormatAge(PH.lastScanTime))
     age:SetTextColor(PAL.textFaint[1], PAL.textFaint[2], PAL.textFaint[3])
+    board.scanAge = age
 
     local rescan = PH.CreateCard(footer, { 0.10, 0.11, 0.15 }, PAL.cardBorder)
     rescan:SetSize(86, 26)
@@ -597,9 +744,8 @@ local function BuildFooter(board, content)
     rText:SetPoint("LEFT", rIcon, "RIGHT", 5, 0)
     rText:SetText("Rescan")
     rText:SetTextColor(PAL.text[1], PAL.text[2], PAL.text[3])
-    rescan:SetScript("OnMouseUp", function()
-        print("|cffcc44ccPreyTracker|r board: Rescan (wired in Phase 3/4).")
-    end)
+    board.rescanText = rText
+    rescan:SetScript("OnMouseUp", function() PH.RescanBoard() end)
     rescan:SetScript("OnEnter", function() PH.Color(rescan.border, CARD_BORDER_HOVER) end)
     rescan:SetScript("OnLeave", function() PH.Color(rescan.border, PAL.cardBorder) end)
 end
@@ -617,6 +763,16 @@ function PH.BuildHuntBoard()
     board:SetMovable(true)
     board:SetClampedToScreen(true)
     board:Hide()
+
+    -- Keep the footer's "Xm ago" scan age ticking up while the board is open
+    -- (throttled — the elapsed time only needs coarse, ~5s, accuracy).
+    board._ageAccum = 5
+    board:SetScript("OnUpdate", function(self, dt)
+        self._ageAccum = self._ageAccum + dt
+        if self._ageAccum < 5 then return end
+        self._ageAccum = 0
+        if self.scanAge then self.scanAge:SetText(FormatAge(PH.lastScanTime)) end
+    end)
 
     -- Background gradient (top → bottom) + border.
     board.bg = board:CreateTexture(nil, "BACKGROUND")
@@ -693,6 +849,36 @@ function PH.BuildHuntBoard()
 
     BuildFooter(board, content)
 
+    -- Out-of-map empty state, covering the grid. PopulateBoard shows it only when
+    -- the board is standalone and nothing has ever been scanned (mirrors the old
+    -- UI.lua "no hunts recorded yet"); otherwise the 4×3 grid shows through.
+    local empty = CreateFrame("Frame", nil, content)
+    empty:SetPoint("TOPLEFT", content, "TOPLEFT", PAD, -(8 + HEADER_H + 8))
+    empty:SetPoint("BOTTOMRIGHT", content, "BOTTOMRIGHT", -PAD, FOOTER_H + 14)
+    empty:SetFrameLevel(content:GetFrameLevel() + 50)
+    empty:EnableMouse(true)   -- swallow clicks so cards behind it don't react
+    local ebg = empty:CreateTexture(nil, "BACKGROUND")
+    ebg:SetAllPoints()
+    ebg:SetTexture(PH.MEDIA.panel_bg)
+    PH.ApplySlice(ebg, 16, 16, 16, 16)
+    PH.Color(ebg, PAL.bgTop)
+    local ecrystal = PH.CreateIcon(empty, "icon_prey", nil, "OVERLAY")
+    ecrystal:SetSize(72, 72)
+    ecrystal:SetPoint("CENTER", empty, "CENTER", 0, 64)
+    local etitle = FS(empty, 18, nil, "OVERLAY")
+    etitle:SetPoint("TOP", ecrystal, "BOTTOM", 0, -16)
+    etitle:SetText("No hunts recorded yet")
+    etitle:SetTextColor(PAL.violet[1], PAL.violet[2], PAL.violet[3])
+    local ebody = FS(empty, 12, nil, "OVERLAY")
+    ebody:SetPoint("TOP", etitle, "BOTTOM", 0, -12)
+    ebody:SetWidth(360)
+    ebody:SetJustifyH("CENTER")
+    ebody:SetTextColor(PAL.textDim[1], PAL.textDim[2], PAL.textDim[3])
+    ebody:SetText("Open the Prey Hunt map at least once to scan your available hunts."
+        .. "\n\nThey'll appear here automatically next time you check.")
+    empty:Hide()
+    board.emptyOverlay = empty
+
     PH.huntBoard = board
     return board
 end
@@ -709,6 +895,85 @@ function PH.UpdateBoardAnguish()
     if board and board.anguishChip then
         board.anguishChip.text:SetText(BreakUpLargeNumbers(PH.GetAnguishCurrency()))
     end
+end
+
+-- Footer achievement readout (name label, "x/y", violet fill) from the resolved
+-- "Prey: Nightmare Mode III" (Achievements.lua). Safe before the data resolves —
+-- shows the target name and 0/0 until criteria are available.
+function PH.UpdateBoardAchievement()
+    local board = PH.huntBoard
+    if not (board and board.achBarFill) then return end
+    local name, completed, total = PH.GetAchievementSummary()
+    board.achName:SetText(name:upper())
+    board.achBarText:SetText(string.format("%d/%d", completed, total))
+    local frac = (total > 0) and (completed / total) or 0
+    board.achBarFill:SetWidth(math.max(1, board.achBarW * frac))
+    board.achBarFill:SetShown(frac > 0)
+end
+
+-- Lightweight refresh for achievement events (CRITERIA_UPDATE / ACHIEVEMENT_EARNED):
+-- re-read criteria and repaint only the Nightmare chips + footer bar, without the
+-- full SetData churn (model reloads etc.) of PopulateBoard.
+function PH.RefreshBoardAchievements()
+    local board = PH.huntBoard
+    if not (board and board:IsShown()) then return end
+    PH.RefreshAchievements()
+    for _, card in pairs(PH.boardCards) do
+        if card.chip and card.data then
+            card.data.achieveDone = PH.HuntAchievementDone(card.data.name)
+            card:Render()
+        end
+    end
+    PH.UpdateBoardAchievement()
+end
+
+-- Rescan button — re-derive hunts from the live pins, re-resolve achievement
+-- criteria, repaint immediately with whatever's cached, then warm any rewards we
+-- don't have yet (repainting as they land). Mirrors the Core.lua map-open path
+-- but keeps the board up instead of showing the loading overlay.
+function PH.RescanBoard()
+    local board = PH.huntBoard
+    if not board then return end
+    if board.rescanText then board.rescanText:SetText("Scanning…") end
+
+    PH.RefreshFromPins()            -- re-scrape pins (stamps PH.lastScanTime)
+    PH.RefreshAchievements(true)    -- force a fresh resolve + criteria read
+    PH.PopulateBoard()              -- instant repaint from the current caches
+
+    PH.WarmRewardCacheAsync(nil, function()
+        if PH.huntBoard and PH.huntBoard:IsShown() then PH.PopulateBoard() end
+        if board.rescanText then board.rescanText:SetText("Rescan") end
+    end)
+end
+
+-- Card hover tooltip: name, difficulty, zone, status, rewards. Out of the map it
+-- also spells out that accepting needs the live Prey map (the card shows the same
+-- as a faint hint where Accept would be).
+function PH.ShowCardTooltip(card)
+    local d = card.data
+    if not d then return end
+    local dc = CFG.DIFF_COLOR[card.diff] or CFG.DIFF_COLOR.Normal
+    local zc = PH.GetZoneColor(card.zone)
+    GameTooltip:SetOwner(card, "ANCHOR_RIGHT")
+    GameTooltip:ClearLines()
+    GameTooltip:AddLine(d.name, 1, 1, 1)
+    GameTooltip:AddLine(card.diff, dc.r, dc.g, dc.b)
+    GameTooltip:AddLine(card.zone or "Unknown", zc.r * 1.3, zc.g * 1.3, zc.b * 1.3)
+    GameTooltip:AddLine(card.inProgress and "|cffffd700In Progress|r" or "|cff55ccffAvailable|r")
+    local rewards = d.rewards or {}
+    if #rewards > 0 then
+        GameTooltip:AddLine(" ")
+        GameTooltip:AddLine("Rewards:", 1, 0.82, 0)
+        for _, r in ipairs(rewards) do
+            GameTooltip:AddLine(r.count and (r.name .. " x" .. r.count) or r.name, 1, 1, 1)
+        end
+    end
+    if PH.standalone and not card.inProgress then
+        GameTooltip:AddLine(" ")
+        GameTooltip:AddLine("Open the Prey map to accept this hunt.",
+            PAL.textFaint[1], PAL.textFaint[2], PAL.textFaint[3])
+    end
+    GameTooltip:Show()
 end
 
 -- Selecting a card reveals its glowing Accept button; only one card across the
@@ -739,11 +1004,15 @@ function PH.PopulateBoard()
     end
     PH.selectedCard = nil
 
+    -- Re-read achievement criteria so the Nightmare chips + footer bar are current.
+    PH.RefreshAchievements()
+
+    -- Merged live + persisted view: live pins first, plus any in-progress hunt
+    -- whose offer pin is gone, plus the out-of-map cache (PH.GetBoardHunts).
+    local hunts = PH.GetBoardHunts()
     local byCell = {}
-    for _, h in ipairs(PH.liveHunts) do
-        if h.zone and h.difficulty then
-            byCell[h.zone .. "|" .. h.difficulty] = h
-        end
+    for _, h in ipairs(hunts) do
+        byCell[h.zone .. "|" .. h.difficulty] = h
     end
 
     -- Widget 7663 progress (0–3) drives the in-progress mini meter. Only one
@@ -762,11 +1031,12 @@ function PH.PopulateBoard()
         else
             local prog = PH.IsInProgress(h.questID)
             card:SetData({
-                name       = h.name,
-                questID    = h.questID,
-                rewards    = PH.rewardCache[h.questID] or {},
-                inProgress = prog,
-                progress   = progressState,
+                name        = h.name,
+                questID     = h.questID,
+                rewards     = PH.RewardsFor(h.questID),
+                inProgress  = prog,
+                progress    = progressState,
+                achieveDone = PH.HuntAchievementDone(h.name),
             })
             if prog then inProgress = inProgress + 1 else available = available + 1 end
         end
@@ -787,8 +1057,17 @@ function PH.PopulateBoard()
         board.footerCounts:SetText(string.format(
             "|cffffd24d%d|r In Progress  |cff565b6c·|r  |cff55ccff%d|r Available",
             inProgress, available))
+        if board.scanAge then board.scanAge:SetText(FormatAge(PH.lastScanTime)) end
+    end
+    if board and board.emptyOverlay then
+        board.emptyOverlay:SetShown(PH.standalone and #hunts == 0)
     end
     PH.UpdateBoardAnguish()
+    PH.UpdateBoardAchievement()
+
+    -- Persist this view so out-of-map opens and a post-accept map reopen can
+    -- render without live pins.
+    PH.SaveCache()
 end
 
 -- Make the board cover CovenantMissionFrame exactly (both corners), so its
@@ -819,50 +1098,146 @@ local function AnchorBoardToMap(board)
     end
 end
 
--- Re-apply each card's creature model from its data. Brand-new PlayerModel frames
--- don't render a model set before their first layout pass, so the initial
--- SetCreature can come up blank until the board is reopened.
-local function RefreshBoardModels()
-    if not PH.boardCards then return end
-    for _, card in pairs(PH.boardCards) do
-        local d = card.data
-        if d and card.hasModel then
-            local displayID  = PH.HUNT_MODELS    and PH.HUNT_MODELS[d.name]
-            local creatureID = PH.HUNT_CREATURES and PH.HUNT_CREATURES[d.name]
-            card.model:Show()
-            if displayID then
-                card.model:SetDisplayInfo(displayID)
-            elseif creatureID then
-                card.model:SetCreature(creatureID)
-            end
-            card.model:SetFacing(0.5)
-        end
+-- Show/hide the map-only minimize button and re-anchor the Anguish chip to sit
+-- left of whatever control is rightmost in the current mode.
+function PH.UpdateBoardChrome()
+    local board = PH.huntBoard
+    if not board then return end
+    local mapMode = board.dockedToMap and true or false
+    board.minBtn:SetShown(mapMode)
+    board.anguishChip:ClearAllPoints()
+    if mapMode then
+        board.anguishChip:SetPoint("RIGHT", board.minBtn, "LEFT", -8, 0)
+    else
+        board.anguishChip:SetPoint("RIGHT", board.closeBtn, "LEFT", -8, 0)
     end
 end
 
--- One-time after the board's first appearance, once the frames are live.
-local function WarmBoardModelsOnce()
-    if PH._boardModelsWarmed then return end
-    PH._boardModelsWarmed = true
-    C_Timer.After(0.1, function()
-        if PH.huntBoard and PH.huntBoard:IsShown() then RefreshBoardModels() end
+-- ---------------------------------------------------------------------------
+-- Restore chip — the crystal on a dark red-glowing pill, pinned to the map's
+-- top-right while the board is minimized. Clicking it restores the board.
+-- FRAGILE: CovenantMissionFrame reference (anchor only).
+-- ---------------------------------------------------------------------------
+local function BuildBoardChip()
+    if PH.boardChip then return PH.boardChip end
+    local chip = PH.CreateCard(UIParent, { 0.07, 0.05, 0.06 }, PAL.anguishRed)
+    chip:SetSize(40, 40)
+    chip:SetFrameStrata("DIALOG")
+    chip:SetFrameLevel(230)
+    chip:EnableMouse(true)
+
+    local glow = PH.CreateGlow(chip, "radial", "BACKGROUND", -1)
+    glow:SetPoint("TOPLEFT", -10, 10)
+    glow:SetPoint("BOTTOMRIGHT", 10, -10)
+    PH.Color(glow, PAL.anguishRed, 0.7)
+
+    -- The prey crystal (pre-colored — not vertex-tinted).
+    local crystal = PH.CreateIcon(chip, "icon_prey", nil, "OVERLAY")
+    crystal:SetSize(30, 30)
+    crystal:SetPoint("CENTER")
+
+    chip:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_LEFT")
+        GameTooltip:AddLine("PreyTracker", PAL.violet[1], PAL.violet[2], PAL.violet[3])
+        GameTooltip:AddLine("Click to restore the Hunt Board", 0.7, 0.7, 0.75)
+        GameTooltip:Show()
     end)
+    chip:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    chip:SetScript("OnMouseUp", function()
+        if PreyTrackerDB then PreyTrackerDB.boardMinimized = false end
+        PH.HideBoardChip()
+        PH.ShowBoard()
+    end)
+
+    chip:Hide()
+    PH.boardChip = chip
+    return chip
 end
 
--- Map-open main screen — replaces the docked panel. Core.lua calls this once
--- the loading overlay has finished warming rewards.
+function PH.ShowBoardChip()
+    if not (CovenantMissionFrame and CovenantMissionFrame:IsShown()) then return end
+    local chip = BuildBoardChip()
+    chip:ClearAllPoints()
+    chip:SetPoint("TOPRIGHT", CovenantMissionFrame, "TOPRIGHT", -12, -12)
+    chip:Show()
+end
+
+function PH.HideBoardChip()
+    if PH.boardChip then PH.boardChip:Hide() end
+end
+
+-- Minimize (map mode only): hide the overlay to reveal Blizzard's map, drop the
+-- restore chip on it, and remember the choice for this session (PreyTrackerDB).
+function PH.MinimizeBoard()
+    if not PreyTrackerDB then PreyTrackerDB = {} end
+    PreyTrackerDB.boardMinimized = true
+    PH.selectedCard = nil
+    if PH.huntBoard then PH.huntBoard:Hide() end
+    PH.ShowBoardChip()
+end
+
+-- Main screen everywhere: over the map (Core.lua, after warming) and centered on
+-- screen (PH.OpenBoardStandalone). Respects a minimized choice while over the map
+-- by showing the restore chip instead of the board.
 function PH.ShowBoard()
     PH.HideLoadingFrame()
     local board = PH.BuildHuntBoard()
     AnchorBoardToMap(board)
+    PH.UpdateBoardChrome()
+    if board.dockedToMap and PreyTrackerDB and PreyTrackerDB.boardMinimized then
+        board:Hide()
+        PH.ShowBoardChip()
+        return
+    end
+    PH.HideBoardChip()
     board:Show()
     PH.PopulateBoard()   -- after Show so card PlayerModels render on first open
-    WarmBoardModelsOnce()
 end
 
--- Hide the board (map close, /prey hide, close button). Safe to call anytime.
+-- /prey and the minimap button: the Hunt Board centered on screen, rendered from
+-- the cached hunts/rewards. Toggles. If the map happens to be open it behaves as
+-- the live map-mode board; otherwise it's read-only (faint "open the map" hint).
+function PH.OpenBoardStandalone()
+    local board = PH.BuildHuntBoard()
+    if board:IsShown() then
+        PH.HideBoard()
+        return
+    end
+    -- An explicit open un-minimizes (otherwise ShowBoard would just re-show the
+    -- restore chip while a hunt's map is open).
+    if PreyTrackerDB then PreyTrackerDB.boardMinimized = false end
+    PH.standalone = not (CovenantMissionFrame and CovenantMissionFrame:IsShown())
+    PH.ShowBoard()
+end
+
+-- Live update of the in-progress card's mini meter from widget 7663
+-- (UPDATE_UI_WIDGET), without the full PopulateBoard churn.
+function PH.UpdateBoardProgress()
+    local board = PH.huntBoard
+    if not (board and board:IsShown()) then return end
+    local prog = 0
+    local info = C_UIWidgetManager
+        and C_UIWidgetManager.GetPreyHuntProgressWidgetVisualizationInfo(PREY_WIDGET_ID)
+    if info then prog = info.progressState or 0 end
+    for _, card in pairs(PH.boardCards) do
+        if card.inProgress and card.data then
+            card.data.progress = prog
+            for i, seg in ipairs(card.meterSegs) do
+                if i <= prog then
+                    seg:SetVertexColor(PAL.gold[1], PAL.gold[2], PAL.gold[3], 1)
+                else
+                    seg:SetVertexColor(0.10, 0.10, 0.14, 1)
+                end
+            end
+        end
+    end
+end
+
+-- Hide the board (map close, /prey hide, close button, watchdog). Also hides the
+-- restore chip so the minimized state can't linger past a board-hide. Safe anytime.
 function PH.HideBoard()
     PH.selectedCard = nil
+    PH.HideBoardChip()
     if PH.huntBoard and PH.huntBoard:IsShown() then
         PH.huntBoard:Hide()
     end
@@ -1007,7 +1382,8 @@ function PH.ToggleHuntBoard()
         return
     end
     AnchorBoardToMap(board)
+    PH.UpdateBoardChrome()
+    PH.HideBoardChip()
     board:Show()
     PH.PopulateBoard()   -- after Show so card PlayerModels render
-    WarmBoardModelsOnce()
 end

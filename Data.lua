@@ -45,21 +45,36 @@ end
 function PH.RefreshFromPins()
     local pool = GetPinPool()
 
+    -- No pin pool at all (map closed, or framework not built yet). We have
+    -- nothing to scan, so leave the existing/last-known hunts untouched — this
+    -- is what lets /prey and the minimap render the last scan out of the map.
+    if not pool then
+        return #PH.liveHunts > 0
+    end
+
     -- Collect new pins first without wiping anything yet
     local newHunts = {}
     local newIDs   = {}
-    if pool then
-        for pin in pool:EnumerateActive() do
-            if pin.questID and pin.title then
-                newHunts[#newHunts + 1] = {
-                    name       = pin.title,
-                    difficulty = ParseDifficulty(pin.description),
-                    questID    = pin.questID,
-                    zone       = GetZoneFromCoords(pin.normalizedX, pin.normalizedY),
-                }
-                newIDs[pin.questID] = true
-            end
+    for pin in pool:EnumerateActive() do
+        if pin.questID and pin.title then
+            newHunts[#newHunts + 1] = {
+                name       = pin.title,
+                difficulty = ParseDifficulty(pin.description),
+                questID    = pin.questID,
+                zone       = GetZoneFromCoords(pin.normalizedX, pin.normalizedY),
+            }
+            newIDs[pin.questID] = true
         end
+    end
+
+    PH.lastScanTime = GetTime()   -- footer "scan age" reads this (HuntBoard.lua)
+
+    -- Pool exists but offers no quest pins — this happens when a hunt is already
+    -- in progress (Blizzard suppresses the other offers). Wiping here would drop
+    -- the in-progress hunt and force a needless reward re-warm, so keep the last
+    -- good scan; GetBoardHunts() re-surfaces the in-progress card from it.
+    if #newHunts == 0 then
+        return #PH.liveHunts > 0
     end
 
     -- Deduplicate: max 1 prey per (difficulty, zone) combination
@@ -317,6 +332,101 @@ PH.filter = { difficulty = "All" }
 
 function PH.IsInProgress(questID)
     return C_QuestLog.IsOnQuest(questID) == true
+end
+
+-- ---------------------------------------------------------------------------
+-- Durable cache (PreyTrackerDB)
+--
+-- The Hunt Board is now the experience everywhere, including out of the map
+-- where there are no pins to scrape. We persist the last good scan (hunts +
+-- rewards) per character so /prey and the minimap button can render from it,
+-- and so an in-progress hunt — whose offer pin Blizzard hides once accepted —
+-- still has a home on the grid when the map is reopened.
+-- ---------------------------------------------------------------------------
+
+-- Rewards for a quest, preferring the live session cache and falling back to
+-- the persisted snapshot (so out-of-map / post-accept cards still show icons).
+function PH.RewardsFor(questID)
+    return PH.rewardCache[questID]
+        or (PreyTrackerDB and PreyTrackerDB.cachedRewards and PreyTrackerDB.cachedRewards[questID])
+        or {}
+end
+
+-- The hunts the board should render: the live pin scan first (freshest), then
+-- any persisted hunt that's currently in progress but absent from the live set
+-- (its offer pin is gone). Deduped on (zone, difficulty) — the board invariant —
+-- so a live cell is never shadowed by a stale persisted one.
+function PH.GetBoardHunts()
+    local out, seenCell = {}, {}
+    local function add(h)
+        if not (h.zone and h.difficulty) then return end
+        local key = h.zone .. "|" .. h.difficulty
+        if seenCell[key] then return end
+        seenCell[key] = true
+        out[#out + 1] = h
+    end
+    for _, h in ipairs(PH.liveHunts) do add(h) end
+    local cached = PreyTrackerDB and PreyTrackerDB.cachedHunts
+    if cached then
+        local haveLive = #PH.liveHunts > 0
+        for _, h in ipairs(cached) do
+            -- Always re-surface an in-progress hunt that's missing from the live
+            -- pins; when there are no live pins at all (out of the map, or a hunt
+            -- is in progress and Blizzard hid every offer), fall back to the full
+            -- cached set so the other cells still render as available cards.
+            if (not haveLive) or PH.IsInProgress(h.questID) then add(h) end
+        end
+    end
+    return out
+end
+
+-- Is any known hunt (live or cached) currently in progress? Used by Core.lua to
+-- show the board promptly when the map opens mid-hunt and no offer pins exist.
+function PH.HasInProgressHunt()
+    for _, h in ipairs(PH.GetBoardHunts()) do
+        if PH.IsInProgress(h.questID) then return true end
+    end
+    return false
+end
+
+-- Persist the current board view (merged hunts + their rewards). Saving the
+-- merged set — not raw liveHunts — keeps an in-progress hunt that's missing
+-- from the live pins from being dropped on the next scan. Never overwrites a
+-- good cache with nothing.
+function PH.SaveCache()
+    if not PreyTrackerDB then PreyTrackerDB = {} end
+    local hunts = PH.GetBoardHunts()
+    if #hunts == 0 then return end
+    local savedHunts, savedRewards = {}, {}
+    for _, h in ipairs(hunts) do
+        savedHunts[#savedHunts + 1] = {
+            name = h.name, difficulty = h.difficulty, questID = h.questID, zone = h.zone,
+        }
+        local r = PH.RewardsFor(h.questID)
+        if r and #r > 0 then savedRewards[h.questID] = r end
+    end
+    PreyTrackerDB.cachedHunts   = savedHunts
+    PreyTrackerDB.cachedRewards = savedRewards
+    PreyTrackerDB.lastScanEpoch = time()
+end
+
+-- Seed the live working set from the persisted snapshot at login, so the board
+-- has data before the map is ever opened this session. Only fills gaps — a live
+-- scan that has already happened wins.
+function PH.LoadCache()
+    if not PreyTrackerDB then return end
+    if #PH.liveHunts == 0 and PreyTrackerDB.cachedHunts then
+        for _, h in ipairs(PreyTrackerDB.cachedHunts) do
+            PH.liveHunts[#PH.liveHunts + 1] = {
+                name = h.name, difficulty = h.difficulty, questID = h.questID, zone = h.zone,
+            }
+        end
+    end
+    if PreyTrackerDB.cachedRewards then
+        for qid, r in pairs(PreyTrackerDB.cachedRewards) do
+            if PH.rewardCache[qid] == nil then PH.rewardCache[qid] = r end
+        end
+    end
 end
 
 function PH.GetZoneColor(zone)
